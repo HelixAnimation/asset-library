@@ -142,7 +142,7 @@ Fields:
 
 ## Visual design reference
 
-A finalized HTML mockup (`asset_library_mockup.html`) exists and should be used as the visual spec. Key design tokens:
+A finalized HTML mockup (`index.html`) exists and should be used as the visual spec. Key design tokens:
 
 - Font: IBM Plex Sans (UI) + IBM Plex Mono (metadata, counts, version strings)
 - Borders: 0.5px, very subtle
