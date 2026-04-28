@@ -205,6 +205,7 @@
   .ctx-action { font-size: 12px; color: var(--text-secondary); padding: 5px 12px; cursor: pointer; white-space: nowrap; }
   .ctx-action:hover { background: var(--bg-secondary); color: var(--text-primary); }
   .card-controls.minimal { justify-content: flex-end; }
+  .tooltip.pinned { opacity: 1 !important; }
 
   /* Modal includes */
   .modal-includes { display: flex; gap: 20px; padding: 5px 0; }
@@ -796,6 +797,8 @@
 
       card.addEventListener('contextmenu', e => {
         e.preventDefault();
+        document.querySelectorAll('.tooltip').forEach(t => t.classList.remove('pinned'));
+        card.querySelector('.tooltip')?.classList.add('pinned');
         buildMenu(idx);
         menu.classList.add('open');
         requestAnimationFrame(() => {
@@ -841,7 +844,10 @@
     function addDivider() { const el = document.createElement('div'); el.className='ctx-divider'; menu.appendChild(el); }
     function addAction(t) { const el = document.createElement('div'); el.className='ctx-action'; el.textContent=t; menu.appendChild(el); return el; }
 
-    document.addEventListener('click', () => menu.classList.remove('open'));
+    document.addEventListener('click', () => {
+      menu.classList.remove('open');
+      document.querySelectorAll('.tooltip').forEach(t => t.classList.remove('pinned'));
+    });
   }
 
   function openEdit(idx) {
