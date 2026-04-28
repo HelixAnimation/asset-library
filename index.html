@@ -110,7 +110,7 @@
   .grid { display: grid; gap: 10px; }
 
   .asset-card { border: 0.5px solid var(--border-light); border-radius: var(--radius-md); overflow: visible; cursor: grab; background: var(--bg-primary); position: relative; transition: border-color 0.12s, transform 0.12s; }
-  .asset-card:hover { border-color: var(--border-mid); transform: translateY(-1px); }
+  .asset-card:hover { border-color: var(--border-mid); transform: translateY(-1px); z-index: 10; }
   .asset-card:active { cursor: grabbing; transform: scale(0.97); }
   .asset-card:hover .tooltip { opacity: 1; }
 
@@ -126,7 +126,7 @@
   .card-fav:hover { opacity: 0.7; }
   .card-fav.on { opacity: 1; }
 
-  .tooltip { position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%); background: var(--bg-primary); border: 0.5px solid var(--border-mid); border-radius: var(--radius-md); padding: 9px 11px; width: 172px; z-index: 100; opacity: 0; transition: opacity 0.15s; pointer-events: none; }
+  .tooltip { position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%); background: var(--bg-primary); border: 0.5px solid var(--border-mid); border-radius: var(--radius-md); padding: 9px 11px; width: 172px; z-index: 1000; opacity: 0; transition: opacity 0.15s; pointer-events: none; }
   .tooltip-name { font-size: 12px; font-weight: 500; color: var(--text-primary); margin-bottom: 6px; padding-bottom: 6px; border-bottom: 0.5px solid var(--border-light); }
   .tooltip-row { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-secondary); margin-bottom: 3px; }
   .tooltip-row span:last-child { color: var(--text-primary); font-family: var(--font-mono); font-size: 10px; }
