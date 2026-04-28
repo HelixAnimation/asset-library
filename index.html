@@ -126,13 +126,15 @@
   .card-fav:hover { opacity: 0.7; }
   .card-fav.on { opacity: 1; }
 
-  .tooltip { position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%); background: var(--bg-primary); border: 0.5px solid var(--border-mid); border-radius: var(--radius-md); padding: 9px 11px; width: 172px; z-index: 1000; opacity: 0; transition: opacity 0.15s; pointer-events: none; }
+  /* Per-card tooltips are hidden data stores — rendered via #global-tooltip */
+  .tooltip { display: none; }
+  #global-tooltip { position: fixed; background: var(--bg-primary); border: 0.5px solid var(--border-mid); border-radius: var(--radius-md); padding: 9px 11px; width: 172px; z-index: 9999; pointer-events: none; opacity: 0; transition: opacity 0.12s; }
+  #global-tooltip.visible { opacity: 1; }
   .tooltip-name { font-size: 12px; font-weight: 500; color: var(--text-primary); margin-bottom: 6px; padding-bottom: 6px; border-bottom: 0.5px solid var(--border-light); }
   .tooltip-row { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-secondary); margin-bottom: 3px; }
   .tooltip-row span:last-child { color: var(--text-primary); font-family: var(--font-mono); font-size: 10px; }
   .tooltip-tags { display: flex; gap: 4px; margin-top: 7px; flex-wrap: wrap; }
   .tooltip-tag { font-size: 10px; padding: 2px 6px; background: var(--bg-secondary); border-radius: 20px; color: var(--text-secondary); border: 0.5px solid var(--border-light); }
-  .tooltip-arrow { position: absolute; bottom: -5px; left: 50%; transform: translateX(-50%) rotate(45deg); width: 8px; height: 8px; background: var(--bg-primary); border-right: 0.5px solid var(--border-mid); border-bottom: 0.5px solid var(--border-mid); }
 
   .statusbar { display: flex; align-items: center; gap: 12px; padding: 6px 14px; border-top: 0.5px solid var(--border-light); background: var(--bg-secondary); flex-shrink: 0; }
   .status-text { font-size: 11px; color: var(--text-tertiary); font-family: var(--font-mono); }
@@ -205,7 +207,6 @@
   .ctx-action { font-size: 12px; color: var(--text-secondary); padding: 5px 12px; cursor: pointer; white-space: nowrap; }
   .ctx-action:hover { background: var(--bg-secondary); color: var(--text-primary); }
   .card-controls.minimal { justify-content: flex-end; }
-  .tooltip.pinned { opacity: 1 !important; }
 
   /* Modal includes */
   .modal-includes { display: flex; gap: 20px; padding: 5px 0; }
@@ -465,6 +466,9 @@
     </div>
   </div>
 </div>
+
+<!-- GLOBAL TOOLTIP -->
+<div id="global-tooltip"></div>
 
 <!-- CONTEXT MENU -->
 <div class="ctx-menu" id="ctx-menu"></div>
@@ -780,11 +784,37 @@
   }
 
   const CARD_STATE = [];
+  const _gt = document.getElementById('global-tooltip');
+
+  function showTooltip(card) {
+    const src = card.querySelector('.tooltip');
+    if (!src) return;
+    _gt.innerHTML = src.innerHTML;
+    _gt.classList.add('visible');
+    const rect = card.getBoundingClientRect();
+    const left = Math.max(8, Math.min(rect.left + rect.width / 2 - 86, window.innerWidth - 180));
+    _gt.style.left = left + 'px';
+    _gt.style.top  = '0px';
+    requestAnimationFrame(() => {
+      const top = rect.top - _gt.offsetHeight - 10;
+      _gt.style.top = Math.max(8, top) + 'px';
+    });
+  }
+
+  function hideTooltip() { if (!_gt.classList.contains('pinned')) _gt.classList.remove('visible'); }
+  function pinTooltip(card) { showTooltip(card); _gt.classList.add('pinned'); }
+  function unpinTooltip() { _gt.classList.remove('visible', 'pinned'); }
+
+  function initTooltips() {
+    document.querySelectorAll('.asset-card').forEach(card => {
+      card.addEventListener('mouseenter', () => { if (!_gt.classList.contains('pinned')) showTooltip(card); });
+      card.addEventListener('mouseleave', hideTooltip);
+    });
+  }
 
   function initContextMenu() {
     const menu = document.getElementById('ctx-menu');
 
-    // Read select data, store in CARD_STATE, remove selects from DOM
     document.querySelectorAll('.asset-card').forEach((card, idx) => {
       const sels = card.querySelectorAll('.card-select');
       const vSel = sels[0], ftSel = sels[1];
@@ -797,8 +827,7 @@
 
       card.addEventListener('contextmenu', e => {
         e.preventDefault();
-        document.querySelectorAll('.tooltip').forEach(t => t.classList.remove('pinned'));
-        card.querySelector('.tooltip')?.classList.add('pinned');
+        pinTooltip(card);
         buildMenu(idx);
         menu.classList.add('open');
         requestAnimationFrame(() => {
@@ -830,6 +859,7 @@
           const card = document.querySelectorAll('.asset-card')[idx];
           const m = CARD_META[idx]?.[ft];
           if (m) updateTooltipMeta(card.querySelector('.tooltip'), m);
+          if (_gt.classList.contains('pinned')) showTooltip(card);
           buildMenu(idx);
         };
       });
@@ -844,10 +874,7 @@
     function addDivider() { const el = document.createElement('div'); el.className='ctx-divider'; menu.appendChild(el); }
     function addAction(t) { const el = document.createElement('div'); el.className='ctx-action'; el.textContent=t; menu.appendChild(el); return el; }
 
-    document.addEventListener('click', () => {
-      menu.classList.remove('open');
-      document.querySelectorAll('.tooltip').forEach(t => t.classList.remove('pinned'));
-    });
+    document.addEventListener('click', () => { menu.classList.remove('open'); unpinTooltip(); });
   }
 
   function openEdit(idx) {
@@ -882,6 +909,7 @@
     document.querySelector('.modal-submit').textContent = 'Import to library';
   };
 
+  initTooltips();
   initContextMenu();
   initMetadata();
 </script>
