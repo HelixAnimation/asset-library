@@ -128,9 +128,10 @@
 
   .card-controls { display: flex; gap: 4px; padding: 4px 6px 6px; align-items: center; }
   .card-select { font-size: 10px; font-family: var(--font-mono); padding: 2px 3px; border: 0.5px solid var(--border-light); border-radius: 4px; background: var(--bg-secondary); color: var(--text-secondary); outline: none; cursor: pointer; flex: 1; min-width: 0; }
-  .card-fav { background: none; border: none; cursor: pointer; font-size: 12px; padding: 0 2px; opacity: 0.25; transition: opacity 0.15s; line-height: 1; color: #c8a000; }
-  .card-fav:hover { opacity: 0.7; }
-  .card-fav.on { opacity: 1; }
+  .card-fav { position: absolute; top: 5px; left: 6px; background: none; border: none; cursor: pointer; font-size: 13px; padding: 0; opacity: 0; transition: opacity 0.15s; line-height: 1; color: #c8a000; z-index: 5; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.35)); }
+  .asset-card:hover .card-fav { opacity: 0.5; }
+  .card-fav:hover { opacity: 1 !important; }
+  .card-fav.on { opacity: 1 !important; }
 
   /* Per-card tooltips are hidden data stores — rendered via #global-tooltip */
   .tooltip { display: none; }
@@ -947,6 +948,18 @@
 
   initTooltips();
   initContextMenu();
+
+  function initFavButtons() {
+    document.querySelectorAll('.asset-card').forEach(card => {
+      const fav      = card.querySelector('.card-fav');
+      const thumb    = card.querySelector('.thumb');
+      const controls = card.querySelector('.card-controls');
+      if (fav && thumb) thumb.appendChild(fav);
+      if (controls) controls.remove();
+    });
+  }
+  initFavButtons();
+
   initMetadata();
 </script>
 </body>
