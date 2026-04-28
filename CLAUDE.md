@@ -42,6 +42,15 @@ Plugins/
 ### Key principle
 Assets are **universal by default** (work in both Houdini and Maya). DCC-exclusive assets are the exception and are flagged in the DB, not assumed.
 
+### USD as the primary format (long-term goal)
+The target is for every asset to be a single **USD file** that bundles everything relevant to its type:
+- **Models** → geometry + materials + rig in one USD
+- **Shaders** → material network as USD/MaterialX
+- **Lighting** → lights + materials in one USD
+- **HDAs** → output as USD where possible
+
+A single USD file works across both Houdini (Solaris) and Maya (Maya USD plugin) without DCC-specific variants. Legacy formats (`.rs`, `.abc`, `.hip`, `.ma`) remain supported for assets not yet migrated. New assets should target USD first.
+
 ---
 
 ## UI design decisions (finalized in mockup)
@@ -121,12 +130,12 @@ Fields:
 
 | Category | File types |
 |---|---|
-| Shaders (RS materials) | `.rs`, `.mtlx` |
-| Models | `.abc`, `.usd`, `.fbx` |
-| HDAs | `.hda`, `.otl` |
+| Shaders (RS materials) | `.usd`, `.rs`, `.mtlx` |
+| Models | `.usd`, `.abc`, `.fbx` |
+| HDAs | `.usd`, `.hda`, `.otl` |
 | Textures | `.exr`, `.tx`, `.png`, `.tif` |
 | HDRIs | `.exr`, `.hdr` |
-| Light rigs | `.hip` (Houdini), `.ma` (Maya) |
+| Light rigs | `.usd`, `.hip` (Houdini), `.ma` (Maya) |
 
 ---
 
@@ -175,5 +184,4 @@ A finalized HTML mockup (`index.html`) exists and should be used as the visual s
 
 - Thumbnail generation strategy (auto-render vs manual screenshot on publish)
 - Whether to use Prism's existing publish hooks or intercept earlier in the pipeline
-- USD/USDZ support for future Solaris adoption (currently evaluating)
 - Permission enforcement — currently planned at filesystem level (NAS), not in the plugin itself
