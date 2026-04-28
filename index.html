@@ -582,22 +582,22 @@
       <div class="modal-row">
         <div class="modal-field">
           <span class="modal-label">Category</span>
-          <select class="modal-select">
-            <option>Shaders / Skin</option>
-            <option>Shaders / Metal</option>
-            <option>Shaders / Glass</option>
-            <option>Shaders / Fabric</option>
-            <option>Shaders / Organic</option>
-            <option>Models / Anatomy</option>
-            <option>Models / Props</option>
-            <option>HDAs / FX</option>
-            <option>HDAs / Rigging</option>
-            <option>Textures / Skin</option>
-            <option>Lighting / HDRIs</option>
-            <option>Lighting / Light rigs</option>
+          <select class="modal-select" id="modal-cat" onchange="updateSubcat()">
+            <option value="shaders">Shaders</option>
+            <option value="models">Models</option>
+            <option value="hdas">HDAs</option>
+            <option value="textures">Textures</option>
+            <option value="lighting">Lighting</option>
           </select>
         </div>
-        <div class="modal-field" style="max-width:100px;">
+        <div class="modal-field">
+          <span class="modal-label">Subcategory</span>
+          <select class="modal-select" id="modal-subcat" onchange="checkCustomSubcat()"></select>
+          <input class="modal-input" id="modal-subcat-input" placeholder="custom subcategory…" style="display:none;margin-top:0;" />
+        </div>
+      </div>
+      <div class="modal-row">
+        <div class="modal-field" style="max-width:90px;">
           <span class="modal-label">File type</span>
           <select class="modal-select">
             <option>.usd</option>
@@ -611,8 +611,6 @@
             <option>.ma</option>
           </select>
         </div>
-      </div>
-      <div class="modal-row">
         <div class="modal-field">
           <span class="modal-label">Renderer</span>
           <select class="modal-select">
@@ -698,7 +696,40 @@
     });
   }
 
-  function openPublish() { document.getElementById('publish-modal').classList.add('open'); }
+  const SUBCATS = {
+    shaders:  ['Skin','Metal','Glass','Fabric','Organic'],
+    models:   ['Anatomy','Props','Environments'],
+    hdas:     ['Rigging','FX','Modeling'],
+    textures: ['Skin','Metal','Glass','Fabric','Organic'],
+    lighting: ['HDRIs','Light rigs'],
+  };
+
+  function updateSubcat() {
+    const cat = document.getElementById('modal-cat').value;
+    const sel = document.getElementById('modal-subcat');
+    const input = document.getElementById('modal-subcat-input');
+    sel.style.display = '';
+    input.style.display = 'none';
+    const opts = (SUBCATS[cat] || []).map(o => `<option>${o}</option>`).join('');
+    sel.innerHTML = opts + '<option value="__custom">+ Custom…</option>';
+  }
+
+  function checkCustomSubcat() {
+    const sel = document.getElementById('modal-subcat');
+    const input = document.getElementById('modal-subcat-input');
+    if (sel.value === '__custom') {
+      sel.style.display = 'none';
+      input.style.display = '';
+      input.value = '';
+      input.focus();
+      input.onkeydown = e => { if (e.key === 'Escape') { sel.style.display = ''; input.style.display = 'none'; sel.value = sel.options[0].value; } };
+    }
+  }
+
+  function openPublish() {
+    updateSubcat();
+    document.getElementById('publish-modal').classList.add('open');
+  }
   function closePublish() { document.getElementById('publish-modal').classList.remove('open'); }
   function closePublishOutside(e) { if (e.target.id === 'publish-modal') closePublish(); }
   function selectSource(el) { document.querySelectorAll('.modal-source-opt').forEach(o => o.classList.remove('active')); el.classList.add('active'); }
