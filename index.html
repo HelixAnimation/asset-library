@@ -98,6 +98,7 @@
   .tree-item { display: flex; align-items: center; gap: 7px; padding: 5px 14px; font-size: 12px; color: var(--text-secondary); cursor: pointer; border-left: 2px solid transparent; transition: all 0.12s; user-select: none; }
   .tree-item:hover { background: var(--bg-primary); color: var(--text-primary); }
   .tree-item.active { color: var(--accent); border-left-color: var(--accent); background: var(--bg-primary); font-weight: 500; }
+  .tree-item.parent { font-weight: 500; }
   .tree-item.child { padding-left: 28px; font-size: 11px; }
   .tree-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; opacity: 0.5; flex-shrink: 0; }
   .count { margin-left: auto; font-size: 10px; color: var(--text-tertiary); font-family: var(--font-mono); }
@@ -307,31 +308,31 @@
         <div class="tree-header">Library</div>
         <div class="tree-item active"><div class="tree-dot"></div> All assets <span class="count">259</span></div>
         <div class="divider"></div>
-        <div class="tree-header">Models</div>
+        <div class="tree-item parent"><div class="tree-dot"></div> Models <span class="count">114</span></div>
         <div class="tree-item child"><div class="tree-dot"></div> Anatomy <span class="count">38</span></div>
         <div class="tree-item child"><div class="tree-dot"></div> Props <span class="count">54</span></div>
         <div class="tree-item child"><div class="tree-dot"></div> Environments <span class="count">22</span></div>
         <div class="divider"></div>
-        <div class="tree-header">Shaders</div>
+        <div class="tree-item parent"><div class="tree-dot"></div> Shaders <span class="count">97</span></div>
         <div class="tree-item child"><div class="tree-dot"></div> Skin <span class="count">14</span></div>
         <div class="tree-item child"><div class="tree-dot"></div> Metal <span class="count">31</span></div>
         <div class="tree-item child"><div class="tree-dot"></div> Glass <span class="count">9</span></div>
         <div class="tree-item child"><div class="tree-dot"></div> Fabric <span class="count">17</span></div>
         <div class="tree-item child"><div class="tree-dot"></div> Organic <span class="count">26</span></div>
         <div class="divider"></div>
-        <div class="tree-header">HDAs</div>
+        <div class="tree-item parent"><div class="tree-dot"></div> HDAs <span class="count">34</span></div>
         <div class="tree-item child"><div class="tree-dot"></div> Rigging <span class="count">11</span></div>
         <div class="tree-item child"><div class="tree-dot"></div> FX <span class="count">8</span></div>
         <div class="tree-item child"><div class="tree-dot"></div> Modeling <span class="count">15</span></div>
         <div class="divider"></div>
-        <div class="tree-header">Textures</div>
+        <div class="tree-item parent"><div class="tree-dot"></div> Textures <span class="count">86</span></div>
         <div class="tree-item child"><div class="tree-dot"></div> Skin <span class="count">18</span></div>
         <div class="tree-item child"><div class="tree-dot"></div> Metal <span class="count">27</span></div>
         <div class="tree-item child"><div class="tree-dot"></div> Glass <span class="count">6</span></div>
         <div class="tree-item child"><div class="tree-dot"></div> Fabric <span class="count">14</span></div>
         <div class="tree-item child"><div class="tree-dot"></div> Organic <span class="count">21</span></div>
         <div class="divider"></div>
-        <div class="tree-header">Lighting</div>
+        <div class="tree-item parent"><div class="tree-dot"></div> Lighting <span class="count">31</span></div>
         <div class="tree-item child"><div class="tree-dot"></div> HDRIs <span class="count">19</span></div>
         <div class="tree-item child"><div class="tree-dot"></div> Light rigs <span class="count">12</span></div>
       </div>
