@@ -493,12 +493,56 @@
             </div>
           </div>
 
+          <div class="asset-card" draggable="true">
+            <div class="tooltip"><div class="tooltip-name">Heart Model</div><div class="tooltip-row"><span>Type</span><span>Model</span></div><div class="tooltip-row"><span>Author</span><span>Dimitar</span></div><div class="tooltip-tags"><span class="tooltip-tag">anatomy</span><span class="tooltip-tag">medical</span><span class="tooltip-tag">rig</span></div><div class="tooltip-arrow"></div></div>
+            <div class="thumb" style="background:#FAECE7;" data-views="material,clay,wire">🫀</div>
+            <div class="card-info"><div class="card-name">Heart Model</div><div class="card-sub">Model<span class="card-sub-sep">·</span><span class="card-filetype"></span></div></div>
+            <div class="card-controls">
+              <select class="card-select"><option>v2.1</option><option>v2.0</option><option>v1.3</option></select>
+              <select class="card-select"><option>.usd</option><option>.abc</option><option>.fbx</option></select>
+              <button class="card-fav on" onclick="toggleFav(this)">★</button>
+            </div>
+          </div>
+
+          <div class="asset-card" draggable="true">
+            <div class="tooltip"><div class="tooltip-name">Skull Base</div><div class="tooltip-row"><span>Type</span><span>Model</span></div><div class="tooltip-row"><span>Author</span><span>Ana</span></div><div class="tooltip-tags"><span class="tooltip-tag">anatomy</span><span class="tooltip-tag">medical</span></div><div class="tooltip-arrow"></div></div>
+            <div class="thumb" style="background:#F5F0E8;" data-views="material,clay,wire">💀</div>
+            <div class="card-info"><div class="card-name">Skull Base</div><div class="card-sub">Model<span class="card-sub-sep">·</span><span class="card-filetype"></span></div></div>
+            <div class="card-controls">
+              <select class="card-select"><option>v1.2</option><option>v1.0</option></select>
+              <select class="card-select"><option>.usd</option><option>.abc</option></select>
+              <button class="card-fav" onclick="toggleFav(this)">★</button>
+            </div>
+          </div>
+
+          <div class="asset-card" draggable="true">
+            <div class="tooltip"><div class="tooltip-name">Spine Section</div><div class="tooltip-row"><span>Type</span><span>Model</span></div><div class="tooltip-row"><span>Author</span><span>Marko</span></div><div class="tooltip-tags"><span class="tooltip-tag">anatomy</span><span class="tooltip-tag">medical</span><span class="tooltip-tag">rig</span></div><div class="tooltip-arrow"></div></div>
+            <div class="thumb" style="background:#EEF0F5;" data-views="material,clay">🦴</div>
+            <div class="card-info"><div class="card-name">Spine Section</div><div class="card-sub">Model<span class="card-sub-sep">·</span><span class="card-filetype"></span></div></div>
+            <div class="card-controls">
+              <select class="card-select"><option>v3.0</option><option>v2.1</option><option>v1.0</option></select>
+              <select class="card-select"><option>.usd</option><option>.abc</option><option>.fbx</option></select>
+              <button class="card-fav" onclick="toggleFav(this)">★</button>
+            </div>
+          </div>
+
+          <div class="asset-card" draggable="true">
+            <div class="tooltip"><div class="tooltip-name">Blood Vessel</div><div class="tooltip-row"><span>Type</span><span>Model</span></div><div class="tooltip-row"><span>Author</span><span>Dimitar</span></div><div class="tooltip-tags"><span class="tooltip-tag">anatomy</span><span class="tooltip-tag">medical</span><span class="tooltip-tag">procedural</span></div><div class="tooltip-arrow"></div></div>
+            <div class="thumb" style="background:#F5E8EE;" data-views="material,clay,wire">🩸</div>
+            <div class="card-info"><div class="card-name">Blood Vessel</div><div class="card-sub">Model<span class="card-sub-sep">·</span><span class="card-filetype"></span></div></div>
+            <div class="card-controls">
+              <select class="card-select"><option>v1.4</option><option>v1.2</option><option>v1.0</option></select>
+              <select class="card-select"><option>.usd</option><option>.abc</option></select>
+              <button class="card-fav" onclick="toggleFav(this)">★</button>
+            </div>
+          </div>
+
         </div>
       </div>
     </div>
 
     <div class="statusbar">
-      <span class="status-text"><b>12</b> assets · filtered by <b>SSS + medical</b></span>
+      <span class="status-text"><b>16</b> assets · filtered by <b>SSS + medical</b></span>
       <span class="drag-hint">drag asset into viewport to import</span>
     </div>
   </div>
@@ -807,6 +851,17 @@
       '.hdr': {rig:false,tex:false,mat:false,renderer:'any', dcc:'universal'} },
     { '.hip': {rig:false,tex:false,mat:true, renderer:'RS',  dcc:'H'},
       '.ma':  {rig:false,tex:false,mat:true, renderer:'any', dcc:'M'} },
+    // Model cards (USD-first)
+    { '.usd': {rig:true, tex:true, mat:true, renderer:'any', dcc:'universal'},
+      '.abc': {rig:false,tex:false,mat:false,renderer:'any', dcc:'universal'},
+      '.fbx': {rig:false,tex:false,mat:false,renderer:'any', dcc:'universal'} },
+    { '.usd': {rig:false,tex:true, mat:true, renderer:'any', dcc:'universal'},
+      '.abc': {rig:false,tex:false,mat:false,renderer:'any', dcc:'universal'} },
+    { '.usd': {rig:true, tex:true, mat:true, renderer:'any', dcc:'universal'},
+      '.abc': {rig:false,tex:false,mat:false,renderer:'any', dcc:'universal'},
+      '.fbx': {rig:false,tex:false,mat:false,renderer:'any', dcc:'universal'} },
+    { '.usd': {rig:false,tex:true, mat:true, renderer:'any', dcc:'universal'},
+      '.abc': {rig:false,tex:false,mat:false,renderer:'any', dcc:'universal'} },
   ];
 
   function updateTooltipMeta(tooltip, m) {
