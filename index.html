@@ -190,6 +190,28 @@
   .view-dot-clay { background: radial-gradient(circle at 35% 30%, #e8c89a, #b07040); }
   .view-dot-wire { background: radial-gradient(circle at 35% 30%, #90d4b0, #2a7a58); }
   .thumb-arrow-btn.hidden { opacity: 0 !important; pointer-events: none; }
+
+  /* Asset badges */
+  .card-badges { display: flex; gap: 3px; margin-top: 4px; flex-wrap: wrap; }
+  .badge { font-size: 9px; font-family: var(--font-mono); padding: 1px 5px; border-radius: 3px; border: 0.5px solid var(--border-light); color: var(--text-tertiary); background: transparent; white-space: nowrap; }
+  .badge.active { border-color: var(--border-mid); }
+  .badge-rs.active  { color: #c05818; border-color: rgba(192,88,24,0.35);  background: rgba(192,88,24,0.07); }
+  .badge-h.active   { color: #a07000; border-color: rgba(160,112,0,0.35);  background: rgba(160,112,0,0.07); }
+  .badge-m.active   { color: #185FA5; border-color: rgba(24,95,165,0.35);  background: rgba(24,95,165,0.07); }
+  .badge-rig.active { color: #5848b8; border-color: rgba(88,72,184,0.35);  background: rgba(88,72,184,0.07); }
+  .badge-tex.active { color: #b04878; border-color: rgba(176,72,120,0.35); background: rgba(176,72,120,0.07); }
+  .badge-mat.active { color: #207848; border-color: rgba(32,120,72,0.35);  background: rgba(32,120,72,0.07); }
+  [data-theme="dark"] .badge-rs.active  { color: #f08840; border-color: rgba(240,136,64,0.4);  background: rgba(240,136,64,0.1); }
+  [data-theme="dark"] .badge-h.active   { color: #dba820; border-color: rgba(219,168,32,0.4);  background: rgba(219,168,32,0.1); }
+  [data-theme="dark"] .badge-m.active   { color: #5ba3e0; border-color: rgba(91,163,224,0.4);  background: rgba(91,163,224,0.1); }
+  [data-theme="dark"] .badge-rig.active { color: #9888e0; border-color: rgba(152,136,224,0.4); background: rgba(152,136,224,0.1); }
+  [data-theme="dark"] .badge-tex.active { color: #e07898; border-color: rgba(224,120,152,0.4); background: rgba(224,120,152,0.1); }
+  [data-theme="dark"] .badge-mat.active { color: #55c088; border-color: rgba(85,192,136,0.4);  background: rgba(85,192,136,0.1); }
+
+  /* Modal includes */
+  .modal-includes { display: flex; gap: 20px; padding: 5px 0; }
+  .include-opt { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); cursor: pointer; user-select: none; }
+  .include-opt input { accent-color: var(--accent); cursor: pointer; }
   .thumb-counter { position: absolute; top: 5px; right: 6px; font-size: 9px; font-family: var(--font-mono); color: rgba(255,255,255,0.85); background: rgba(0,0,0,0.38); padding: 1px 5px; border-radius: 10px; opacity: 0; transition: opacity 0.15s; z-index: 10; pointer-events: none; white-space: nowrap; }
   .asset-card:hover .thumb-counter { opacity: 1; }
 </style>
@@ -503,6 +525,33 @@
           </select>
         </div>
       </div>
+      <div class="modal-row">
+        <div class="modal-field">
+          <span class="modal-label">Renderer</span>
+          <select class="modal-select">
+            <option>Any renderer</option>
+            <option selected>Redshift</option>
+            <option>Arnold</option>
+            <option>V-Ray</option>
+          </select>
+        </div>
+        <div class="modal-field">
+          <span class="modal-label">DCC</span>
+          <select class="modal-select">
+            <option selected>Universal</option>
+            <option>Houdini only</option>
+            <option>Maya only</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-field">
+        <span class="modal-label">Includes</span>
+        <div class="modal-includes">
+          <label class="include-opt"><input type="checkbox"> Rig</label>
+          <label class="include-opt"><input type="checkbox"> Textures</label>
+          <label class="include-opt"><input type="checkbox" checked> Materials</label>
+        </div>
+      </div>
       <div class="modal-field">
         <span class="modal-label">Tags</span>
         <div class="modal-tags-wrap" onclick="this.querySelector('input').focus()">
@@ -683,6 +732,67 @@
   }
 
   initGalleries();
+
+  // Metadata per card (indexed by DOM order), keyed by file type option value
+  const CARD_META = [
+    { '.rs':  {rig:false,tex:false,mat:true, renderer:'RS',  dcc:'H'},
+      '.mtlx':{rig:false,tex:false,mat:true, renderer:'any', dcc:'universal'} },
+    { '.rs':  {rig:false,tex:true, mat:true, renderer:'RS',  dcc:'H'},
+      '.mtlx':{rig:false,tex:false,mat:true, renderer:'any', dcc:'universal'} },
+    { '.rs':  {rig:false,tex:true, mat:true, renderer:'RS',  dcc:'H'},
+      '.mtlx':{rig:false,tex:false,mat:true, renderer:'any', dcc:'universal'} },
+    { '.rs':  {rig:false,tex:false,mat:true, renderer:'RS',  dcc:'H'},
+      '.mtlx':{rig:false,tex:false,mat:true, renderer:'any', dcc:'universal'} },
+    { '.rs':  {rig:false,tex:true, mat:true, renderer:'RS',  dcc:'H'},
+      '.mtlx':{rig:false,tex:false,mat:true, renderer:'any', dcc:'universal'} },
+    { '.rs':  {rig:false,tex:false,mat:true, renderer:'RS',  dcc:'H'},
+      '.mtlx':{rig:false,tex:false,mat:true, renderer:'any', dcc:'universal'} },
+    { '.rs':  {rig:false,tex:true, mat:true, renderer:'RS',  dcc:'H'},
+      '.mtlx':{rig:false,tex:false,mat:true, renderer:'any', dcc:'universal'} },
+    { '.rs':  {rig:false,tex:true, mat:true, renderer:'RS',  dcc:'H'},
+      '.mtlx':{rig:false,tex:false,mat:true, renderer:'any', dcc:'universal'} },
+    { '.exr': {rig:false,tex:false,mat:false,renderer:'any', dcc:'universal'},
+      '.hdr': {rig:false,tex:false,mat:false,renderer:'any', dcc:'universal'} },
+    { '.hip': {rig:false,tex:false,mat:true, renderer:'RS',  dcc:'H'},
+      '.ma':  {rig:false,tex:false,mat:true, renderer:'any', dcc:'M'} },
+    { '.exr': {rig:false,tex:false,mat:false,renderer:'any', dcc:'universal'},
+      '.hdr': {rig:false,tex:false,mat:false,renderer:'any', dcc:'universal'} },
+    { '.hip': {rig:false,tex:false,mat:true, renderer:'RS',  dcc:'H'},
+      '.ma':  {rig:false,tex:false,mat:true, renderer:'any', dcc:'M'} },
+  ];
+
+  function renderBadges(el, m) {
+    el.innerHTML = '';
+    const add = (text, cls, active) => {
+      const b = document.createElement('span');
+      b.className = `badge badge-${cls}${active ? ' active' : ''}`;
+      b.textContent = text;
+      el.appendChild(b);
+    };
+    if (m.renderer !== 'any') add(m.renderer, m.renderer.toLowerCase(), true);
+    if (m.dcc === 'H' || m.dcc === 'universal') add('H', 'h', true);
+    if (m.dcc === 'M' || m.dcc === 'universal') add('M', 'm', true);
+    add('Rig', 'rig', m.rig);
+    add('Tex', 'tex', m.tex);
+    add('Mat', 'mat', m.mat);
+  }
+
+  function initBadges() {
+    document.querySelectorAll('.asset-card').forEach((card, idx) => {
+      const meta = CARD_META[idx];
+      if (!meta) return;
+      const badgesEl = document.createElement('div');
+      badgesEl.className = 'card-badges';
+      card.querySelector('.card-info').appendChild(badgesEl);
+      const ftSelect = card.querySelectorAll('.card-select')[1];
+      if (!ftSelect) return;
+      const update = () => { const m = meta[ftSelect.value]; if (m) renderBadges(badgesEl, m); };
+      ftSelect.addEventListener('change', update);
+      update();
+    });
+  }
+
+  initBadges();
 </script>
 </body>
 </html>
