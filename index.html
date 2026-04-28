@@ -75,8 +75,13 @@
 
   .filter-dropdown { position: absolute; top: calc(100% + 6px); right: 0; background: var(--bg-primary); border: 0.5px solid var(--border-mid); border-radius: var(--radius-md); padding: 10px; min-width: 200px; z-index: 200; display: none; max-height: 480px; overflow-y: auto; }
   .filter-dropdown.open { display: block; }
-  .filter-section-label { font-size: 10px; font-family: var(--font-mono); color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 6px; margin-top: 10px; }
+  .filter-section-label { font-size: 10px; font-family: var(--font-mono); color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 4px; margin-top: 10px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; user-select: none; }
   .filter-section-label:first-child { margin-top: 0; }
+  .filter-section-label:hover { color: var(--text-secondary); }
+  .filter-section-label::after { content: '›'; font-size: 12px; transform: rotate(90deg); display: inline-block; transition: transform 0.15s; letter-spacing: 0; }
+  .filter-section-label.collapsed::after { transform: rotate(0deg); }
+  .filter-group-content { overflow: hidden; }
+  .filter-group-content.collapsed { display: none; }
   .filter-option { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); padding: 4px 2px; cursor: pointer; }
   .filter-option:hover { color: var(--text-primary); }
   .filter-option input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; }
@@ -247,37 +252,47 @@
       <div style="position:relative;">
         <button class="toolbar-btn" id="filter-toggle-btn" onclick="toggleFilters(event)">⚙ Filters</button>
         <div class="filter-dropdown" id="filter-dropdown">
-          <div class="filter-section-label">DCC</div>
-          <label class="filter-option"><input type="checkbox" checked> All DCCs</label>
-          <label class="filter-option"><input type="checkbox"> Houdini exclusive</label>
-          <label class="filter-option"><input type="checkbox"> Maya exclusive</label>
+          <div class="filter-section-label" onclick="toggleFilterSection(this)">DCC</div>
+          <div class="filter-group-content">
+            <label class="filter-option"><input type="checkbox" checked> All DCCs</label>
+            <label class="filter-option"><input type="checkbox"> Houdini exclusive</label>
+            <label class="filter-option"><input type="checkbox"> Maya exclusive</label>
+          </div>
           <div class="filter-divider"></div>
-          <div class="filter-section-label">Type</div>
-          <label class="filter-option"><input type="checkbox" checked> Materials</label>
-          <label class="filter-option"><input type="checkbox" checked> Models</label>
-          <label class="filter-option"><input type="checkbox" checked> HDAs</label>
-          <label class="filter-option"><input type="checkbox" checked> HDRIs / Light rigs</label>
-          <label class="filter-option"><input type="checkbox" checked> Textures</label>
+          <div class="filter-section-label" onclick="toggleFilterSection(this)">Type</div>
+          <div class="filter-group-content">
+            <label class="filter-option"><input type="checkbox" checked> Materials</label>
+            <label class="filter-option"><input type="checkbox" checked> Models</label>
+            <label class="filter-option"><input type="checkbox" checked> HDAs</label>
+            <label class="filter-option"><input type="checkbox" checked> HDRIs / Light rigs</label>
+            <label class="filter-option"><input type="checkbox" checked> Textures</label>
+          </div>
           <div class="filter-divider"></div>
-          <div class="filter-section-label">File type</div>
-          <label class="filter-option"><input type="checkbox" checked> .rs</label>
-          <label class="filter-option"><input type="checkbox" checked> .mtlx</label>
-          <label class="filter-option"><input type="checkbox" checked> .abc</label>
-          <label class="filter-option"><input type="checkbox" checked> .hda</label>
-          <label class="filter-option"><input type="checkbox" checked> .exr</label>
-          <label class="filter-option"><input type="checkbox" checked> .hdr</label>
-          <label class="filter-option"><input type="checkbox" checked> .hip</label>
-          <label class="filter-option"><input type="checkbox" checked> .ma</label>
+          <div class="filter-section-label collapsed" onclick="toggleFilterSection(this)">File type</div>
+          <div class="filter-group-content collapsed">
+            <label class="filter-option"><input type="checkbox" checked> .rs</label>
+            <label class="filter-option"><input type="checkbox" checked> .mtlx</label>
+            <label class="filter-option"><input type="checkbox" checked> .abc</label>
+            <label class="filter-option"><input type="checkbox" checked> .hda</label>
+            <label class="filter-option"><input type="checkbox" checked> .exr</label>
+            <label class="filter-option"><input type="checkbox" checked> .hdr</label>
+            <label class="filter-option"><input type="checkbox" checked> .hip</label>
+            <label class="filter-option"><input type="checkbox" checked> .ma</label>
+          </div>
           <div class="filter-divider"></div>
-          <div class="filter-section-label">Includes</div>
-          <label class="filter-option"><input type="checkbox"> Rig</label>
-          <label class="filter-option"><input type="checkbox"> Textures</label>
-          <label class="filter-option"><input type="checkbox"> Materials</label>
+          <div class="filter-section-label collapsed" onclick="toggleFilterSection(this)">Includes</div>
+          <div class="filter-group-content collapsed">
+            <label class="filter-option"><input type="checkbox"> Rig</label>
+            <label class="filter-option"><input type="checkbox"> Textures</label>
+            <label class="filter-option"><input type="checkbox"> Materials</label>
+          </div>
           <div class="filter-divider"></div>
-          <div class="filter-section-label">Author</div>
-          <label class="filter-option"><input type="checkbox" checked> Dimitar</label>
-          <label class="filter-option"><input type="checkbox" checked> Ana</label>
-          <label class="filter-option"><input type="checkbox" checked> Marko</label>
+          <div class="filter-section-label collapsed" onclick="toggleFilterSection(this)">Author</div>
+          <div class="filter-group-content collapsed">
+            <label class="filter-option"><input type="checkbox" checked> Dimitar</label>
+            <label class="filter-option"><input type="checkbox" checked> Ana</label>
+            <label class="filter-option"><input type="checkbox" checked> Marko</label>
+          </div>
         </div>
       </div>
     </div>
@@ -593,6 +608,11 @@
   function setTheme(t) {
     document.documentElement.setAttribute('data-theme', t);
     document.querySelectorAll('.theme-btn').forEach(b => b.classList.toggle('active', b.textContent.toLowerCase() === t));
+  }
+
+  function toggleFilterSection(label) {
+    label.classList.toggle('collapsed');
+    label.nextElementSibling.classList.toggle('collapsed');
   }
 
   function toggleFilters(e) {
