@@ -73,7 +73,7 @@
   .publish-btn { background: var(--green-bg); color: var(--green); border-color: var(--green-border); font-weight: 500; }
   .publish-btn:hover { opacity: 0.85; }
 
-  .filter-dropdown { position: absolute; top: calc(100% + 6px); right: 0; background: var(--bg-primary); border: 0.5px solid var(--border-mid); border-radius: var(--radius-md); padding: 10px; min-width: 200px; z-index: 200; display: none; }
+  .filter-dropdown { position: absolute; top: calc(100% + 6px); right: 0; background: var(--bg-primary); border: 0.5px solid var(--border-mid); border-radius: var(--radius-md); padding: 10px; min-width: 200px; z-index: 200; display: none; max-height: 480px; overflow-y: auto; }
   .filter-dropdown.open { display: block; }
   .filter-section-label { font-size: 10px; font-family: var(--font-mono); color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 6px; margin-top: 10px; }
   .filter-section-label:first-child { margin-top: 0; }
@@ -258,6 +258,21 @@
           <label class="filter-option"><input type="checkbox" checked> HDAs</label>
           <label class="filter-option"><input type="checkbox" checked> HDRIs / Light rigs</label>
           <label class="filter-option"><input type="checkbox" checked> Textures</label>
+          <div class="filter-divider"></div>
+          <div class="filter-section-label">File type</div>
+          <label class="filter-option"><input type="checkbox" checked> .rs</label>
+          <label class="filter-option"><input type="checkbox" checked> .mtlx</label>
+          <label class="filter-option"><input type="checkbox" checked> .abc</label>
+          <label class="filter-option"><input type="checkbox" checked> .hda</label>
+          <label class="filter-option"><input type="checkbox" checked> .exr</label>
+          <label class="filter-option"><input type="checkbox" checked> .hdr</label>
+          <label class="filter-option"><input type="checkbox" checked> .hip</label>
+          <label class="filter-option"><input type="checkbox" checked> .ma</label>
+          <div class="filter-divider"></div>
+          <div class="filter-section-label">Includes</div>
+          <label class="filter-option"><input type="checkbox"> Rig</label>
+          <label class="filter-option"><input type="checkbox"> Textures</label>
+          <label class="filter-option"><input type="checkbox"> Materials</label>
           <div class="filter-divider"></div>
           <div class="filter-section-label">Author</div>
           <label class="filter-option"><input type="checkbox" checked> Dimitar</label>
