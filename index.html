@@ -107,6 +107,7 @@
   .main { flex: 1; overflow-y: auto; padding: 14px; }
 
   .tag-row { display: flex; gap: 6px; margin-bottom: 12px; align-items: center; overflow: hidden; flex-wrap: nowrap; }
+  .tag-row-label { font-size: 10px; font-family: var(--font-mono); color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.07em; flex-shrink: 0; margin-right: 2px; }
   .tag { font-size: 11px; font-family: var(--font); padding: 3px 9px; border-radius: 20px; background: var(--bg-secondary); border: 0.5px solid var(--border-light); color: var(--text-secondary); cursor: pointer; transition: all 0.12s; user-select: none; white-space: nowrap; flex-shrink: 0; }
   .tag:hover { border-color: var(--border-mid); color: var(--text-primary); }
   .tag.active { background: var(--accent-bg); color: var(--accent-text); border-color: var(--accent-border); }
@@ -124,7 +125,9 @@
 
   .card-info { padding: 6px 8px 2px; border-top: 0.5px solid var(--border-light); }
   .card-name { font-size: 11px; font-weight: 500; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .card-sub { font-size: 10px; color: var(--text-tertiary); margin-top: 1px; font-family: var(--font-mono); }
+  .card-sub { display: flex; align-items: center; gap: 5px; font-size: 10px; color: var(--text-tertiary); margin-top: 1px; font-family: var(--font-mono); }
+  .card-filetype { color: var(--text-tertiary); opacity: 0.6; }
+  .card-sub-sep { opacity: 0.3; }
 
   .card-controls { display: flex; gap: 4px; padding: 4px 6px 6px; align-items: center; }
   .card-select { font-size: 10px; font-family: var(--font-mono); padding: 2px 3px; border: 0.5px solid var(--border-light); border-radius: 4px; background: var(--bg-secondary); color: var(--text-secondary); outline: none; cursor: pointer; flex: 1; min-width: 0; }
@@ -344,6 +347,7 @@
 
       <div class="main">
         <div class="tag-row" id="tag-row">
+          <span class="tag-row-label">Tags</span>
           <div class="tag active">SSS</div>
           <div class="tag active">medical</div>
           <div class="tag">subsurface</div>
@@ -359,7 +363,7 @@
           <div class="asset-card" draggable="true">
             <div class="tooltip"><div class="tooltip-name">Skin SSS v3</div><div class="tooltip-row"><span>Type</span><span>RS Material</span></div><div class="tooltip-row"><span>Author</span><span>Dimitar</span></div><div class="tooltip-tags"><span class="tooltip-tag">SSS</span><span class="tooltip-tag">medical</span><span class="tooltip-tag">skin</span></div><div class="tooltip-arrow"></div></div>
             <div class="thumb" style="background:#FDF0EC;" data-views="material,clay,wire">🧬</div>
-            <div class="card-info"><div class="card-name">Skin SSS v3</div><div class="card-sub">Material</div></div>
+            <div class="card-info"><div class="card-name">Skin SSS v3</div><div class="card-sub">Material<span class="card-sub-sep">·</span><span class="card-filetype"></span></div></div>
             <div class="card-controls">
               <select class="card-select"><option>v3.1</option><option>v3.0</option><option>v2.4</option></select>
               <select class="card-select"><option>.rs</option><option>.mtlx</option></select>
@@ -370,7 +374,7 @@
           <div class="asset-card" draggable="true">
             <div class="tooltip"><div class="tooltip-name">Cornea Wet</div><div class="tooltip-row"><span>Type</span><span>RS Material</span></div><div class="tooltip-row"><span>Author</span><span>Ana</span></div><div class="tooltip-tags"><span class="tooltip-tag">eye</span><span class="tooltip-tag">wet</span><span class="tooltip-tag">SSS</span></div><div class="tooltip-arrow"></div></div>
             <div class="thumb" style="background:#E8F4FD;" data-views="material,clay,wire">👁️</div>
-            <div class="card-info"><div class="card-name">Cornea Wet</div><div class="card-sub">Material</div></div>
+            <div class="card-info"><div class="card-name">Cornea Wet</div><div class="card-sub">Material<span class="card-sub-sep">·</span><span class="card-filetype"></span></div></div>
             <div class="card-controls">
               <select class="card-select"><option>v1.4</option><option>v1.3</option><option>v1.0</option></select>
               <select class="card-select"><option>.rs</option><option>.mtlx</option></select>
@@ -381,7 +385,7 @@
           <div class="asset-card" draggable="true">
             <div class="tooltip"><div class="tooltip-name">Artery Wall</div><div class="tooltip-row"><span>Type</span><span>RS Material</span></div><div class="tooltip-row"><span>Author</span><span>Marko</span></div><div class="tooltip-tags"><span class="tooltip-tag">medical</span><span class="tooltip-tag">translucent</span></div><div class="tooltip-arrow"></div></div>
             <div class="thumb" style="background:#FAECE7;" data-views="material,clay">🫀</div>
-            <div class="card-info"><div class="card-name">Artery Wall</div><div class="card-sub">Material</div></div>
+            <div class="card-info"><div class="card-name">Artery Wall</div><div class="card-sub">Material<span class="card-sub-sep">·</span><span class="card-filetype"></span></div></div>
             <div class="card-controls">
               <select class="card-select"><option>v2.0</option><option>v1.2</option></select>
               <select class="card-select"><option>.rs</option><option>.mtlx</option></select>
@@ -392,7 +396,7 @@
           <div class="asset-card" draggable="true">
             <div class="tooltip"><div class="tooltip-name">Muscle Tissue</div><div class="tooltip-row"><span>Type</span><span>RS Material</span></div><div class="tooltip-row"><span>Author</span><span>Dimitar</span></div><div class="tooltip-tags"><span class="tooltip-tag">SSS</span><span class="tooltip-tag">medical</span></div><div class="tooltip-arrow"></div></div>
             <div class="thumb" style="background:#FAECE7;" data-views="material,clay,wire">💪</div>
-            <div class="card-info"><div class="card-name">Muscle Tissue</div><div class="card-sub">Material</div></div>
+            <div class="card-info"><div class="card-name">Muscle Tissue</div><div class="card-sub">Material<span class="card-sub-sep">·</span><span class="card-filetype"></span></div></div>
             <div class="card-controls">
               <select class="card-select"><option>v1.2</option><option>v1.0</option></select>
               <select class="card-select"><option>.rs</option><option>.mtlx</option></select>
@@ -403,7 +407,7 @@
           <div class="asset-card" draggable="true">
             <div class="tooltip"><div class="tooltip-name">Bone Dense</div><div class="tooltip-row"><span>Type</span><span>RS Material</span></div><div class="tooltip-row"><span>Author</span><span>Ana</span></div><div class="tooltip-tags"><span class="tooltip-tag">medical</span><span class="tooltip-tag">subsurface</span></div><div class="tooltip-arrow"></div></div>
             <div class="thumb" style="background:#F5F0E8;" data-views="material,clay">🦴</div>
-            <div class="card-info"><div class="card-name">Bone Dense</div><div class="card-sub">Material</div></div>
+            <div class="card-info"><div class="card-name">Bone Dense</div><div class="card-sub">Material<span class="card-sub-sep">·</span><span class="card-filetype"></span></div></div>
             <div class="card-controls">
               <select class="card-select"><option>v2.3</option><option>v2.0</option><option>v1.1</option></select>
               <select class="card-select"><option>.rs</option><option>.mtlx</option></select>
@@ -414,7 +418,7 @@
           <div class="asset-card" draggable="true">
             <div class="tooltip"><div class="tooltip-name">Cell Membrane</div><div class="tooltip-row"><span>Type</span><span>RS Material</span></div><div class="tooltip-row"><span>Author</span><span>Marko</span></div><div class="tooltip-tags"><span class="tooltip-tag">SSS</span><span class="tooltip-tag">translucent</span></div><div class="tooltip-arrow"></div></div>
             <div class="thumb" style="background:#E8F5EE;" data-views="material,clay,wire">🔬</div>
-            <div class="card-info"><div class="card-name">Cell Membrane</div><div class="card-sub">Material</div></div>
+            <div class="card-info"><div class="card-name">Cell Membrane</div><div class="card-sub">Material<span class="card-sub-sep">·</span><span class="card-filetype"></span></div></div>
             <div class="card-controls">
               <select class="card-select"><option>v1.0</option></select>
               <select class="card-select"><option>.rs</option><option>.mtlx</option></select>
@@ -425,7 +429,7 @@
           <div class="asset-card" draggable="true">
             <div class="tooltip"><div class="tooltip-name">Fat Layer</div><div class="tooltip-row"><span>Type</span><span>RS Material</span></div><div class="tooltip-row"><span>Author</span><span>Dimitar</span></div><div class="tooltip-tags"><span class="tooltip-tag">skin</span><span class="tooltip-tag">layered</span></div><div class="tooltip-arrow"></div></div>
             <div class="thumb" style="background:#FAEEDA;" data-views="material,clay">🫧</div>
-            <div class="card-info"><div class="card-name">Fat Layer</div><div class="card-sub">Material</div></div>
+            <div class="card-info"><div class="card-name">Fat Layer</div><div class="card-sub">Material<span class="card-sub-sep">·</span><span class="card-filetype"></span></div></div>
             <div class="card-controls">
               <select class="card-select"><option>v1.1</option><option>v1.0</option></select>
               <select class="card-select"><option>.rs</option><option>.mtlx</option></select>
@@ -436,7 +440,7 @@
           <div class="asset-card" draggable="true">
             <div class="tooltip"><div class="tooltip-name">Vein SSS</div><div class="tooltip-row"><span>Type</span><span>RS Material</span></div><div class="tooltip-row"><span>Author</span><span>Ana</span></div><div class="tooltip-tags"><span class="tooltip-tag">SSS</span><span class="tooltip-tag">medical</span><span class="tooltip-tag">wet</span></div><div class="tooltip-arrow"></div></div>
             <div class="thumb" style="background:#EAE8F5;" data-views="material,clay,wire">🩸</div>
-            <div class="card-info"><div class="card-name">Vein SSS</div><div class="card-sub">Material</div></div>
+            <div class="card-info"><div class="card-name">Vein SSS</div><div class="card-sub">Material<span class="card-sub-sep">·</span><span class="card-filetype"></span></div></div>
             <div class="card-controls">
               <select class="card-select"><option>v2.1</option><option>v2.0</option><option>v1.3</option></select>
               <select class="card-select"><option>.rs</option><option>.mtlx</option></select>
@@ -447,7 +451,7 @@
           <div class="asset-card" draggable="true">
             <div class="tooltip"><div class="tooltip-name">Studio Softbox</div><div class="tooltip-row"><span>Type</span><span>HDRI</span></div><div class="tooltip-row"><span>Author</span><span>Dimitar</span></div><div class="tooltip-tags"><span class="tooltip-tag">studio</span><span class="tooltip-tag">neutral</span></div><div class="tooltip-arrow"></div></div>
             <div class="thumb" style="background:#EAF3FD;" data-views="material">🌤️</div>
-            <div class="card-info"><div class="card-name">Studio Softbox</div><div class="card-sub">HDRI</div></div>
+            <div class="card-info"><div class="card-name">Studio Softbox</div><div class="card-sub">HDRI<span class="card-sub-sep">·</span><span class="card-filetype"></span></div></div>
             <div class="card-controls">
               <select class="card-select"><option>v1.0</option></select>
               <select class="card-select"><option>.exr</option><option>.hdr</option></select>
@@ -458,7 +462,7 @@
           <div class="asset-card" draggable="true">
             <div class="tooltip"><div class="tooltip-name">OR Overhead</div><div class="tooltip-row"><span>Type</span><span>Light rig</span></div><div class="tooltip-row"><span>Author</span><span>Dimitar</span></div><div class="tooltip-tags"><span class="tooltip-tag">medical</span><span class="tooltip-tag">surgical</span></div><div class="tooltip-arrow"></div></div>
             <div class="thumb" style="background:#F0F4FF;" data-views="material,clay">🔦</div>
-            <div class="card-info"><div class="card-name">OR Overhead</div><div class="card-sub">Light rig</div></div>
+            <div class="card-info"><div class="card-name">OR Overhead</div><div class="card-sub">Light rig<span class="card-sub-sep">·</span><span class="card-filetype"></span></div></div>
             <div class="card-controls">
               <select class="card-select"><option>v2.0</option><option>v1.0</option></select>
               <select class="card-select"><option>.hip</option><option>.ma</option></select>
@@ -469,7 +473,7 @@
           <div class="asset-card" draggable="true">
             <div class="tooltip"><div class="tooltip-name">Overcast Day</div><div class="tooltip-row"><span>Type</span><span>HDRI</span></div><div class="tooltip-row"><span>Author</span><span>Ana</span></div><div class="tooltip-tags"><span class="tooltip-tag">outdoor</span><span class="tooltip-tag">diffuse</span></div><div class="tooltip-arrow"></div></div>
             <div class="thumb" style="background:#E8EAF0;" data-views="material">☁️</div>
-            <div class="card-info"><div class="card-name">Overcast Day</div><div class="card-sub">HDRI</div></div>
+            <div class="card-info"><div class="card-name">Overcast Day</div><div class="card-sub">HDRI<span class="card-sub-sep">·</span><span class="card-filetype"></span></div></div>
             <div class="card-controls">
               <select class="card-select"><option>v1.2</option><option>v1.0</option></select>
               <select class="card-select"><option>.exr</option><option>.hdr</option></select>
@@ -480,7 +484,7 @@
           <div class="asset-card" draggable="true">
             <div class="tooltip"><div class="tooltip-name">3-Point Warm</div><div class="tooltip-row"><span>Type</span><span>Light rig</span></div><div class="tooltip-row"><span>Author</span><span>Marko</span></div><div class="tooltip-tags"><span class="tooltip-tag">warm</span><span class="tooltip-tag">studio</span></div><div class="tooltip-arrow"></div></div>
             <div class="thumb" style="background:#FDF4E3;" data-views="material,clay">💡</div>
-            <div class="card-info"><div class="card-name">3-Point Warm</div><div class="card-sub">Light rig</div></div>
+            <div class="card-info"><div class="card-name">3-Point Warm</div><div class="card-sub">Light rig<span class="card-sub-sep">·</span><span class="card-filetype"></span></div></div>
             <div class="card-controls">
               <select class="card-select"><option>v1.3</option><option>v1.0</option></select>
               <select class="card-select"><option>.hip</option><option>.ma</option></select>
@@ -517,7 +521,6 @@
         <span class="modal-label">Source</span>
         <div class="modal-source">
           <div class="modal-source-opt active" onclick="selectSource(this)"><span class="modal-source-icon">📂</span>From disk</div>
-          <div class="modal-source-opt" onclick="selectSource(this)"><span class="modal-source-icon">🎨</span>From DCC scene</div>
           <div class="modal-source-opt" onclick="selectSource(this)"><span class="modal-source-icon">🔗</span>From Prism publish</div>
         </div>
       </div>
@@ -861,6 +864,8 @@
       if (vSel)  vSel.remove();
       if (ftSel) ftSel.remove();
       card.querySelector('.card-controls').classList.add('minimal');
+      const ftLabel = card.querySelector('.card-filetype');
+      if (ftLabel) ftLabel.textContent = filetypes[0] || '';
 
       card.addEventListener('contextmenu', e => {
         e.preventDefault();
@@ -897,6 +902,8 @@
           const m = CARD_META[idx]?.[ft];
           if (m) updateTooltipMeta(card.querySelector('.tooltip'), m);
           if (_gt.classList.contains('pinned')) showTooltip(card);
+          const ftLabel = card.querySelector('.card-filetype');
+          if (ftLabel) ftLabel.textContent = ft;
           buildMenu(idx);
         };
       });
