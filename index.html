@@ -318,7 +318,7 @@
         <div class="tree-item child"><div class="tree-dot"></div> Props <span class="count">54</span></div>
         <div class="tree-item child"><div class="tree-dot"></div> Environments <span class="count">22</span></div>
         <div class="divider"></div>
-        <div class="tree-item parent"><div class="tree-dot"></div> Shaders <span class="count">97</span></div>
+        <div class="tree-item parent"><div class="tree-dot"></div> Materials <span class="count">97</span></div>
         <div class="tree-item child"><div class="tree-dot"></div> Skin <span class="count">14</span></div>
         <div class="tree-item child"><div class="tree-dot"></div> Metal <span class="count">31</span></div>
         <div class="tree-item child"><div class="tree-dot"></div> Glass <span class="count">9</span></div>
@@ -583,7 +583,7 @@
         <div class="modal-field">
           <span class="modal-label">Category</span>
           <select class="modal-select" id="modal-cat" onchange="updateSubcat()">
-            <option value="shaders">Shaders</option>
+            <option value="materials">Materials</option>
             <option value="models">Models</option>
             <option value="hdas">HDAs</option>
             <option value="textures">Textures</option>
@@ -697,11 +697,11 @@
   }
 
   const SUBCATS = {
-    shaders:  ['Skin','Metal','Glass','Fabric','Organic','Fluid'],
-    models:   ['Anatomy','Organs','Props','Environments'],
-    hdas:     ['Rigging','FX','Modeling'],
-    textures: ['Skin','Metal','Glass','Fabric','Organic'],
-    lighting: ['HDRIs','Light rigs'],
+    materials: ['Skin','Metal','Glass','Fabric','Organic','Fluid','GPU Open'],
+    models:    ['Anatomy','Organs','Props','Environments'],
+    hdas:      ['Rigging','FX','Modeling'],
+    textures:  ['Skin','Metal','Glass','Fabric','Organic'],
+    lighting:  ['HDRIs','Light rigs','Poly Haven'],
   };
 
   function updateSubcat() {
