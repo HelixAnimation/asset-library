@@ -999,6 +999,15 @@
         };
       });
 
+      if (s.filetypes.includes('.usd')) {
+        addDivider();
+        addLabel('USD');
+        const viewUsd = addAction('View USD');
+        viewUsd.onclick = e => { e.stopPropagation(); menu.classList.remove('open'); };
+        const viewPrism = addAction('View USD via Prism');
+        viewPrism.onclick = e => { e.stopPropagation(); menu.classList.remove('open'); };
+      }
+
       addDivider();
       const editBtn = addAction('Edit asset…');
       editBtn.onclick = e => { e.stopPropagation(); menu.classList.remove('open'); openEdit(idx); };
