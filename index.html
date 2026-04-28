@@ -193,6 +193,19 @@
 
   .tooltip-meta-divider { height: 0.5px; background: var(--border-light); margin: 6px 0 4px; }
 
+  /* Context menu */
+  .ctx-menu { position: fixed; background: var(--bg-primary); border: 0.5px solid var(--border-mid); border-radius: var(--radius-md); padding: 4px 0; min-width: 152px; z-index: 400; display: none; box-shadow: 0 4px 20px rgba(0,0,0,0.13); }
+  .ctx-menu.open { display: block; }
+  .ctx-label { font-size: 9px; font-family: var(--font-mono); color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.07em; padding: 6px 12px 2px; }
+  .ctx-item { font-size: 12px; color: var(--text-secondary); padding: 5px 12px 5px 26px; cursor: pointer; position: relative; white-space: nowrap; }
+  .ctx-item:hover { background: var(--bg-secondary); color: var(--text-primary); }
+  .ctx-item.active { color: var(--text-primary); font-weight: 500; }
+  .ctx-item.active::before { content: '•'; position: absolute; left: 11px; color: var(--accent); font-size: 14px; line-height: 1.1; }
+  .ctx-divider { height: 0.5px; background: var(--border-light); margin: 4px 0; }
+  .ctx-action { font-size: 12px; color: var(--text-secondary); padding: 5px 12px; cursor: pointer; white-space: nowrap; }
+  .ctx-action:hover { background: var(--bg-secondary); color: var(--text-primary); }
+  .card-controls.minimal { justify-content: flex-end; }
+
   /* Modal includes */
   .modal-includes { display: flex; gap: 20px; padding: 5px 0; }
   .include-opt { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); cursor: pointer; user-select: none; }
@@ -451,6 +464,9 @@
     </div>
   </div>
 </div>
+
+<!-- CONTEXT MENU -->
+<div class="ctx-menu" id="ctx-menu"></div>
 
 <!-- PUBLISH MODAL -->
 <div class="modal-overlay" id="publish-modal" onclick="closePublishOutside(event)">
@@ -762,19 +778,105 @@
       (includes.length ? `<div class="tooltip-row"><span>Includes</span><span>${includes.join(' · ')}</span></div>` : '');
   }
 
+  const CARD_STATE = [];
+
+  function initContextMenu() {
+    const menu = document.getElementById('ctx-menu');
+
+    // Read select data, store in CARD_STATE, remove selects from DOM
+    document.querySelectorAll('.asset-card').forEach((card, idx) => {
+      const sels = card.querySelectorAll('.card-select');
+      const vSel = sels[0], ftSel = sels[1];
+      const versions  = vSel  ? [...vSel.options].map(o => o.text)  : [];
+      const filetypes = ftSel ? [...ftSel.options].map(o => o.text) : [];
+      CARD_STATE[idx] = { version: versions[0]||'', filetype: filetypes[0]||'', versions, filetypes };
+      if (vSel)  vSel.remove();
+      if (ftSel) ftSel.remove();
+      card.querySelector('.card-controls').classList.add('minimal');
+
+      card.addEventListener('contextmenu', e => {
+        e.preventDefault();
+        buildMenu(idx);
+        menu.classList.add('open');
+        requestAnimationFrame(() => {
+          const mx = Math.min(e.clientX, window.innerWidth  - menu.offsetWidth  - 8);
+          const my = Math.min(e.clientY, window.innerHeight - menu.offsetHeight - 8);
+          menu.style.left = mx + 'px';
+          menu.style.top  = my + 'px';
+        });
+      });
+    });
+
+    function buildMenu(idx) {
+      const s = CARD_STATE[idx];
+      menu.innerHTML = '';
+
+      addLabel('Version');
+      s.versions.forEach(v => {
+        const item = addItem(v, v === s.version);
+        item.onclick = e => { e.stopPropagation(); s.version = v; buildMenu(idx); };
+      });
+
+      addDivider();
+      addLabel('File type');
+      s.filetypes.forEach(ft => {
+        const item = addItem(ft, ft === s.filetype);
+        item.onclick = e => {
+          e.stopPropagation();
+          s.filetype = ft;
+          const card = document.querySelectorAll('.asset-card')[idx];
+          const m = CARD_META[idx]?.[ft];
+          if (m) updateTooltipMeta(card.querySelector('.tooltip'), m);
+          buildMenu(idx);
+        };
+      });
+
+      addDivider();
+      const editBtn = addAction('Edit asset…');
+      editBtn.onclick = e => { e.stopPropagation(); menu.classList.remove('open'); openEdit(idx); };
+    }
+
+    function addLabel(t) { const el = document.createElement('div'); el.className='ctx-label'; el.textContent=t; menu.appendChild(el); }
+    function addItem(t, active) { const el = document.createElement('div'); el.className='ctx-item'+(active?' active':''); el.textContent=t; menu.appendChild(el); return el; }
+    function addDivider() { const el = document.createElement('div'); el.className='ctx-divider'; menu.appendChild(el); }
+    function addAction(t) { const el = document.createElement('div'); el.className='ctx-action'; el.textContent=t; menu.appendChild(el); return el; }
+
+    document.addEventListener('click', () => menu.classList.remove('open'));
+  }
+
+  function openEdit(idx) {
+    const s = CARD_STATE[idx];
+    const card = document.querySelectorAll('.asset-card')[idx];
+    const modal = document.getElementById('publish-modal');
+    modal.querySelector('.modal-title').textContent = 'Edit asset';
+    modal.querySelector('.modal-submit').textContent = 'Save changes';
+    const inputs = modal.querySelectorAll('.modal-input');
+    if (inputs[0]) inputs[0].value = card.querySelector('.card-name')?.textContent || '';
+    if (inputs[1]) inputs[1].value = s.version;
+    modal.classList.add('open');
+  }
+
   function initMetadata() {
     document.querySelectorAll('.asset-card').forEach((card, idx) => {
       const meta = CARD_META[idx];
       if (!meta) return;
-      const tooltip  = card.querySelector('.tooltip');
-      const ftSelect = card.querySelectorAll('.card-select')[1];
-      if (!tooltip || !ftSelect) return;
-      const update = () => { const m = meta[ftSelect.value]; if (m) updateTooltipMeta(tooltip, m); };
-      ftSelect.addEventListener('change', update);
-      update();
+      const tooltip = card.querySelector('.tooltip');
+      if (!tooltip) return;
+      const ft = CARD_STATE[idx]?.filetype;
+      const m = ft ? meta[ft] : Object.values(meta)[0];
+      if (m) updateTooltipMeta(tooltip, m);
     });
   }
 
+  // Reset modal to Add mode when closed
+  const _origClose = window.closePublish;
+  closePublish = function() {
+    _origClose();
+    document.querySelector('.modal-title').textContent = 'Import asset to library';
+    document.querySelector('.modal-submit').textContent = 'Import to library';
+  };
+
+  initContextMenu();
   initMetadata();
 </script>
 </body>
