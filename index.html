@@ -191,22 +191,7 @@
   .view-dot-wire { background: radial-gradient(circle at 35% 30%, #90d4b0, #2a7a58); }
   .thumb-arrow-btn.hidden { opacity: 0 !important; pointer-events: none; }
 
-  /* Asset badges */
-  .card-badges { display: flex; gap: 3px; margin-top: 4px; flex-wrap: wrap; }
-  .badge { font-size: 9px; font-family: var(--font-mono); padding: 1px 5px; border-radius: 3px; border: 0.5px solid var(--border-light); color: var(--text-tertiary); background: transparent; white-space: nowrap; }
-  .badge.active { border-color: var(--border-mid); }
-  .badge-rs.active  { color: #c05818; border-color: rgba(192,88,24,0.35);  background: rgba(192,88,24,0.07); }
-  .badge-h.active   { color: #a07000; border-color: rgba(160,112,0,0.35);  background: rgba(160,112,0,0.07); }
-  .badge-m.active   { color: #185FA5; border-color: rgba(24,95,165,0.35);  background: rgba(24,95,165,0.07); }
-  .badge-rig.active { color: #5848b8; border-color: rgba(88,72,184,0.35);  background: rgba(88,72,184,0.07); }
-  .badge-tex.active { color: #b04878; border-color: rgba(176,72,120,0.35); background: rgba(176,72,120,0.07); }
-  .badge-mat.active { color: #207848; border-color: rgba(32,120,72,0.35);  background: rgba(32,120,72,0.07); }
-  [data-theme="dark"] .badge-rs.active  { color: #f08840; border-color: rgba(240,136,64,0.4);  background: rgba(240,136,64,0.1); }
-  [data-theme="dark"] .badge-h.active   { color: #dba820; border-color: rgba(219,168,32,0.4);  background: rgba(219,168,32,0.1); }
-  [data-theme="dark"] .badge-m.active   { color: #5ba3e0; border-color: rgba(91,163,224,0.4);  background: rgba(91,163,224,0.1); }
-  [data-theme="dark"] .badge-rig.active { color: #9888e0; border-color: rgba(152,136,224,0.4); background: rgba(152,136,224,0.1); }
-  [data-theme="dark"] .badge-tex.active { color: #e07898; border-color: rgba(224,120,152,0.4); background: rgba(224,120,152,0.1); }
-  [data-theme="dark"] .badge-mat.active { color: #55c088; border-color: rgba(85,192,136,0.4);  background: rgba(85,192,136,0.1); }
+  .tooltip-meta-divider { height: 0.5px; background: var(--border-light); margin: 6px 0 4px; }
 
   /* Modal includes */
   .modal-includes { display: flex; gap: 20px; padding: 5px 0; }
@@ -761,38 +746,36 @@
       '.ma':  {rig:false,tex:false,mat:true, renderer:'any', dcc:'M'} },
   ];
 
-  function renderBadges(el, m) {
-    el.innerHTML = '';
-    const add = (text, cls, active) => {
-      const b = document.createElement('span');
-      b.className = `badge badge-${cls}${active ? ' active' : ''}`;
-      b.textContent = text;
-      el.appendChild(b);
-    };
-    if (m.renderer !== 'any') add(m.renderer, m.renderer.toLowerCase(), true);
-    if (m.dcc === 'H' || m.dcc === 'universal') add('H', 'h', true);
-    if (m.dcc === 'M' || m.dcc === 'universal') add('M', 'm', true);
-    add('Rig', 'rig', m.rig);
-    add('Tex', 'tex', m.tex);
-    add('Mat', 'mat', m.mat);
+  function updateTooltipMeta(tooltip, m) {
+    let section = tooltip.querySelector('.tooltip-meta');
+    if (!section) {
+      section = document.createElement('div');
+      section.className = 'tooltip-meta';
+      tooltip.insertBefore(section, tooltip.querySelector('.tooltip-arrow'));
+    }
+    const dccLabel = { universal: 'Universal', H: 'Houdini', M: 'Maya' }[m.dcc] || m.dcc;
+    const includes = [m.rig && 'Rig', m.tex && 'Textures', m.mat && 'Materials'].filter(Boolean);
+    section.innerHTML =
+      `<div class="tooltip-meta-divider"></div>` +
+      (m.renderer !== 'any' ? `<div class="tooltip-row"><span>Renderer</span><span>${m.renderer}</span></div>` : '') +
+      `<div class="tooltip-row"><span>DCC</span><span>${dccLabel}</span></div>` +
+      (includes.length ? `<div class="tooltip-row"><span>Includes</span><span>${includes.join(' · ')}</span></div>` : '');
   }
 
-  function initBadges() {
+  function initMetadata() {
     document.querySelectorAll('.asset-card').forEach((card, idx) => {
       const meta = CARD_META[idx];
       if (!meta) return;
-      const badgesEl = document.createElement('div');
-      badgesEl.className = 'card-badges';
-      card.querySelector('.card-info').appendChild(badgesEl);
+      const tooltip  = card.querySelector('.tooltip');
       const ftSelect = card.querySelectorAll('.card-select')[1];
-      if (!ftSelect) return;
-      const update = () => { const m = meta[ftSelect.value]; if (m) renderBadges(badgesEl, m); };
+      if (!tooltip || !ftSelect) return;
+      const update = () => { const m = meta[ftSelect.value]; if (m) updateTooltipMeta(tooltip, m); };
       ftSelect.addEventListener('change', update);
       update();
     });
   }
 
-  initBadges();
+  initMetadata();
 </script>
 </body>
 </html>
