@@ -71,39 +71,51 @@ Library
 ─────────────
 Models
   Anatomy
+  Organs
   Props
   Environments
 ─────────────
-Shaders
+Materials
   Skin
   Metal
   Glass
   Fabric
   Organic
+  Fluid
+  GPU Open
 ─────────────
 HDAs
   Rigging
   FX
   Modeling
 ─────────────
-Textures        ← separate from Shaders, same subcategory names
+Textures
   Skin
   Metal
   Glass
   Fabric
   Organic
 ─────────────
-Lighting        ← separate from Textures
+Lighting
   HDRIs
   Light rigs
+  Poly Haven
 ```
 
 ### Asset cards
 - Thumbnail area (height scales with size slider)
-- Asset name + type subtitle
-- Bottom controls row: **version dropdown** | **file type dropdown** | **★ favorite toggle**
-- Hover reveals tooltip: name, type, author, tags — no click needed
+- Thumbnail gallery: render type dots (material / clay / wire) switch render view; arrows cycle images within that type
+- **★ favorite** in top-left corner of thumbnail
+- Asset name + type · filetype subtitle
+- No bottom controls — version and file type are changed via **right-click context menu**
+- Hover reveals tooltip: name, type, author, renderer, DCC, includes (rig/tex/mat), tags
 - Draggable into DCC viewport (auto import/reference)
+
+### Right-click context menu
+- **Version** — radio list of all available versions
+- **File type** — radio list of available file types for that asset
+- **USD** section (only shown if `.usd` is available) — **View USD** | **View USD via Prism**
+- **Edit asset…** — opens the import dialog pre-filled with current asset data
 
 ### Tag row
 - Shows active tags + inactive tags inline
@@ -111,18 +123,25 @@ Lighting        ← separate from Textures
 - "+ tag" button at end to add new tags
 
 ### Filters dropdown (toolbar)
-Groups: DCC (All / Houdini exclusive / Maya exclusive), Type (Materials / Models / HDAs / HDRIs+Light rigs / Textures), Author
+Groups:
+- **DCC**: All / Houdini exclusive / Maya exclusive
+- **Type**: Materials / Models / HDAs / HDRIs+Light rigs / Textures
+- **File type**: .usd / .rs / .mtlx / .abc / .hda / .exr / .hdr / .hip / .ma
+- **Includes**: Rig / Textures / Materials
+- **Author**
 
-### Publish dialog
-Triggered by **+ Publish** button (green, top-right toolbar).
+### Import dialog
+Triggered by **Import** button (toolbar).
 Fields:
-- **Source**: From disk | From DCC scene | From Prism publish (3-option selector)
+- **Source**: From disk | From Prism publish
 - Asset name + version
-- Category (hierarchical: e.g. "Shaders / Skin")
-- File type (`.rs`, `.mtlx`, `.abc`, `.hda`, `.exr`, `.hdr`, `.hip`, `.ma`)
+- **Category** dropdown (Materials / Models / HDAs / Textures / Lighting)
+- **Subcategory** dropdown — options change based on category; last option is **+ Custom…** which swaps to a text input
+- File type (`.usd`, `.rs`, `.mtlx`, `.abc`, `.hda`, `.exr`, `.hdr`, `.hip`, `.ma`)
+- Renderer (Any / Redshift / Arnold / V-Ray)
+- DCC (Universal / Houdini only / Maya only)
+- Includes: Rig / Textures / Materials (checkboxes)
 - Tags (pill-style, click to remove, type to add)
-
-"From DCC scene" is the default source — this is the primary workflow for artists publishing directly from Houdini or Maya via the Prism plugin.
 
 ---
 
@@ -130,7 +149,7 @@ Fields:
 
 | Category | File types |
 |---|---|
-| Shaders (RS materials) | `.usd`, `.rs`, `.mtlx` |
+| Materials | `.usd`, `.rs`, `.mtlx` |
 | Models | `.usd`, `.abc`, `.fbx` |
 | HDAs | `.usd`, `.hda`, `.otl` |
 | Textures | `.exr`, `.tx`, `.png`, `.tif` |
@@ -141,11 +160,19 @@ Fields:
 
 ## Interaction behaviors
 
-- **Drag and drop**: drag card into DCC viewport → auto import/reference. Works for both Houdini and Maya viewports.
-- **Favorites**: star toggle on card, persisted in `library.db`, surfaced in sidebar "Favorites" section
-- **Version picker**: dropdown on card shows all available versions (pulled from Prism versioning). Selecting a version changes what gets imported on drag.
-- **Thumbnail size**: slider in toolbar resizes grid columns and thumbnail height proportionally (min ~90px, max ~170px)
-- **Tags**: stored in `library.db`, many-to-many relationship with assets
+- **Drag and drop**: drag card into DCC viewport → auto import/reference at the selected version and file type. Works for Houdini and Maya.
+- **Right-click menu**: change version, change file type, view USD, view USD via Prism, edit asset metadata
+- **View USD**: opens the asset's `.usd` file in usdview (or DCC equivalent)
+- **View USD via Prism**: opens/references the asset through Prism's version browser
+- **Favorites**: star in thumbnail corner, persisted in `library.db`, surfaced in sidebar "Favorites" section
+- **Version picker**: right-click → Version. Selected version is what gets imported on drag.
+- **File type picker**: right-click → File type. Tooltip updates to reflect metadata for the selected type.
+- **Thumbnail gallery**: render type dots switch between material/clay/wire renders; arrows cycle images within the active type
+- **Thumbnail size**: slider in toolbar resizes grid columns proportionally (min ~90px, max ~170px)
+- **Tags**: stored in `library.db`, many-to-many with assets; filterable from toolbar filters
+- **Sidebar navigation**: clicking a category or subcategory filters the grid to that scope
+- **Search**: filters grid by asset name in real time
+- **Filters dropdown**: stacks DCC + Type + File type + Includes + Author filters; all additive
 
 ---
 
@@ -164,12 +191,35 @@ A finalized HTML mockup (`index.html`) exists and should be used as the visual s
 
 ## What still needs to be built
 
-1. **Prism 2 plugin scaffold** — plugin class, hooks into Prism's library tab
-2. **SQLite schema** — assets, tags, asset_tags, favorites, recently_used tables
-3. **PySide2 panel** — port the HTML mockup to Qt widgets inside Prism
-4. **DCC bridge** — Houdini Python API for drag-import, Maya cmds equivalent
-5. **Publish pipeline** — validation, thumbnail generation, DB write, Prism publish hook
-6. **Thumbnail generation** — auto-render or manual screenshot on publish
+### Phase 1 — Foundation
+1. **Prism 2 plugin scaffold** — `AssetLibraryPro.py` plugin class, register with Prism, replace/hook the library tab
+2. **SQLite schema** — tables: `assets`, `categories`, `tags`, `asset_tags`, `favorites`, `recently_used`; migrations strategy for schema changes
+
+### Phase 2 — Data layer
+3. **DB read/write layer** (`core/db.py`) — CRUD for all tables, queries for filtering by category/tag/DCC/filetype/author
+4. **Asset discovery** — scan NAS for Prism-published assets, populate `library.db` on first run and keep in sync
+
+### Phase 3 — UI panel
+5. **Main Qt panel** (`ui/library_browser.py`) — split layout: sidebar tree (185px) + thumbnail grid, inside Prism's panel system
+6. **Sidebar tree** — category/subcategory tree with live asset counts; Favorites and Recent sections at top; clicking filters the grid
+7. **Asset cards** — thumbnail widget, name/subtitle, star toggle in thumbnail corner; thumbnail gallery (render type dots + arrows)
+8. **Toolbar** — search (real-time filter), sort dropdown, size slider, filters dropdown, Import button
+9. **Filters dropdown** — collapsible sections: DCC / Type / File type / Includes / Author; all filters additive
+10. **Right-click context menu** — version picker, file type picker, View USD, View USD via Prism, Edit asset
+11. **Tooltip** — hover overlay: name, type, author, renderer, DCC, includes, tags; updates when file type changes
+12. **Import dialog** (`ui/publish_dialog.py`) — source, name, version, category + subcategory (with custom), file type, renderer, DCC, includes, tags
+
+### Phase 4 — DCC integration
+13. **Drag and drop** — drag card into Houdini or Maya viewport; import or reference at selected version/filetype via `core/dcc_bridge.py`
+14. **View USD** — launch usdview (or Houdini/Maya USD viewer) for the selected asset
+15. **View USD via Prism** — open asset through Prism's version browser / reference system
+16. **Houdini bridge** — Python API calls for import, reference, usdview launch
+17. **Maya bridge** — `maya.cmds` equivalent for import and reference
+
+### Phase 5 — Asset ingestion
+18. **Import pipeline** — validate source file, copy to NAS under correct Prism path, write metadata to DB, trigger thumbnail generation
+19. **Thumbnail generation** — strategy TBD: auto-render via headless Houdini/RS, or manual screenshot on publish; store as sidecar `.png` next to Prism files
+20. **Edit asset** — pre-fill import dialog with existing metadata; update DB record without re-ingesting file
 
 ---
 
