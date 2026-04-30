@@ -19,6 +19,7 @@ from ui.sidebar import SidebarWidget
 from ui.asset_card import AssetCard
 from ui.publish_dialog import PublishDialog
 from ui.settings_dialog import SettingsDialog
+from ui.inspector import InspectorPanel
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,8 @@ class LibraryBrowser(QMainWindow):
         # -- Cards cache --------------------------------------------------
         self._all_cards = []   # list of AssetCard (all loaded)
         self._visible_cards = []
+        self._selected_card = None
+        self._pre_inspect_width = 960
 
         self._search_timer = QTimer()
         self._search_timer.setSingleShot(True)
@@ -84,16 +87,25 @@ class LibraryBrowser(QMainWindow):
 
         root.addWidget(self._buildToolbar())
 
-        body = QWidget()
-        body_layout = QHBoxLayout(body)
-        body_layout.setContentsMargins(0, 0, 0, 0)
-        body_layout.setSpacing(0)
+        body = QSplitter(Qt.Horizontal)
+        body.setHandleWidth(1)
+        body.setChildrenCollapsible(True)
 
         self.sidebar = SidebarWidget()
         self.sidebar.itemSelected.connect(self._onSidebarSelect)
-        body_layout.addWidget(self.sidebar)
+        body.addWidget(self.sidebar)
 
-        body_layout.addWidget(self._buildContent(), 1)
+        body.addWidget(self._buildContent())
+
+        self.inspector = InspectorPanel()
+        self.inspector.closeRequested.connect(self._hideInspector)
+        self.inspector.hide()
+        body.addWidget(self.inspector)
+
+        body.setSizes([185, 600, 340])
+        body.setStretchFactor(0, 0)
+        body.setStretchFactor(1, 1)
+        body.setStretchFactor(2, 0)
         root.addWidget(body, 1)
 
         root.addWidget(self._buildStatusBar())
@@ -288,6 +300,7 @@ class LibraryBrowser(QMainWindow):
             card = AssetCard(a, is_fav, versions, filetypes)
             card.starToggled.connect(self._onStarToggled)
             card.assetImport.connect(self._onAssetImport)
+            card.assetClicked.connect(self._onCardClicked)
             self._all_cards.append(card)
 
         self._applyFilters()
@@ -416,13 +429,43 @@ class LibraryBrowser(QMainWindow):
             return
         try:
             db.add_recent(asset_id, self._username)
+            counts = db.get_category_counts(username=self._username)
         finally:
             db.close()
-        # Refresh sidebar count and current view if showing recents
-        counts = db.get_category_counts(username=self._username) if db else {}
         self.sidebar.setCounts(counts)
         if self._special == "recent":
             self._applyFilters()
+
+    def _onCardClicked(self, asset_data):
+        # Deselect previous
+        if self._selected_card:
+            self._selected_card.setSelected(False)
+        # Find and select new card
+        for c in self._visible_cards:
+            if c.asset_data.get("id") == asset_data.get("id"):
+                c.setSelected(True)
+                self._selected_card = c
+                break
+        # Populate and show inspector
+        self.inspector.setAsset(asset_data)
+        if self.inspector.isHidden():
+            self._pre_inspect_width = self.width()
+            self.inspector.show()
+            if self.width() < 1300:
+                self.resize(1300, self.height())
+
+    def _hideInspector(self):
+        self.inspector.hide()
+        if self._selected_card:
+            self._selected_card.setSelected(False)
+            self._selected_card = None
+        self.resize(self._pre_inspect_width, self.height())
+
+    def keyPressEvent(self, e):
+        if e.key() == Qt.Key_Escape and self.inspector.isVisible():
+            self._hideInspector()
+        else:
+            super().keyPressEvent(e)
 
     def _onSettingsClicked(self):
         dlg = SettingsDialog(plugin=self.plugin, parent=self)

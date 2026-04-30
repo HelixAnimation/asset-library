@@ -27,6 +27,7 @@ _CARD_RADIUS = 6
 class AssetCard(QWidget):
     starToggled     = Signal(int, bool)
     assetImport     = Signal(dict)
+    assetClicked    = Signal(dict)
     versionChanged  = Signal(int, str)
     filetypeChanged = Signal(int, str)
 
@@ -42,6 +43,8 @@ class AssetCard(QWidget):
         self._current_view = "material"
         self._view_thumbs  = {"material": [], "clay": [], "wire": []}
         self._current_idx  = 0
+        self._selected     = False
+        self._hover        = False
         self._scanThumbs()
 
         # Prevent Qt from pre-erasing the widget rect to the palette dark colour
@@ -87,10 +90,14 @@ class AssetCard(QWidget):
         self.thumb = _ThumbWidget(self.asset_data, self)
         layout.addWidget(self.thumb)
 
-        # ── Overlays (absolute children of thumb) ─────────────────────
+        # ── Overlays (absolute children of the card, not thumb) ──────
+        # Parenting to self (AssetCard) avoids a Qt/Windows issue where
+        # WA_NoSystemBackground on _ThumbWidget causes its children to
+        # lose native-window embedding and appear as floating top-level
+        # windows at screen position (0, 0).
 
         # Star — top-left
-        self.star_btn = _StarBtn(self.thumb)
+        self.star_btn = _StarBtn(self)
         self.star_btn.setCursor(Qt.PointingHandCursor)
         self.star_btn.clicked.connect(self._onStarClicked)
         self.star_btn.setFav(self._is_fav)
@@ -98,8 +105,8 @@ class AssetCard(QWidget):
             self.star_btn.hide()
 
         # Arrows — circle buttons matching HTML .thumb-arrow-btn
-        self.arrow_left  = _ArrowBtn(self.thumb)
-        self.arrow_right = _ArrowBtn(self.thumb, mirror=True)
+        self.arrow_left  = _ArrowBtn(self)
+        self.arrow_right = _ArrowBtn(self, mirror=True)
         self.arrow_left.hide()
         self.arrow_right.hide()
         self.arrow_left.clicked.connect(self._onArrowLeft)
@@ -108,14 +115,14 @@ class AssetCard(QWidget):
         # View dots
         self._dots = {}
         for view, _ in _VIEWS:
-            dot = _DotButton(self.thumb)
+            dot = _DotButton(self)
             dot.setCursor(Qt.PointingHandCursor)
             dot.hide()
             dot.clicked.connect(lambda v=view: self._onViewDotClicked(v))
             self._dots[view] = dot
 
         # Counter pill — top-right
-        self.thumb_counter = _CounterLabel("", self.thumb)
+        self.thumb_counter = _CounterLabel("", self)
         self.thumb_counter.setStyleSheet(
             "QLabel { color: white; font-size: 13px;"
             " font-family: 'IBM Plex Mono', monospace; padding: 2px 8px; }"
@@ -203,6 +210,7 @@ class AssetCard(QWidget):
     def _onHoverEnter(self):
         self._hover = True
         self._border.setHover(True)
+        self._border._selected = self._selected
         if not self._is_fav:
             self.star_btn.show()
             self.star_btn.raise_()
@@ -216,7 +224,7 @@ class AssetCard(QWidget):
         if self.underMouse():
             return
         self._hover = False
-        self._border.setHover(False)
+        self._border.setHover(self._selected)
         if not self._is_fav:
             self.star_btn.hide()
         for dot in self._dots.values():
@@ -269,6 +277,16 @@ class AssetCard(QWidget):
 
     def mouseDoubleClickEvent(self, e):
         self.assetImport.emit(self.asset_data)
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            self.assetClicked.emit(self.asset_data)
+
+    def setSelected(self, selected):
+        self._selected = selected
+        self._border._selected = selected
+        self._border.setHover(selected or self._hover)
+        self._border.update()
 
     # ── Thumbnail display ───────────────────────────────────────────────
 
@@ -451,6 +469,7 @@ class _BorderOverlay(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._hover = False
+        self._selected = False
         self.setAttribute(Qt.WA_NoSystemBackground)
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
 
@@ -467,7 +486,12 @@ class _BorderOverlay(QWidget):
             QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5),
             _CARD_RADIUS - 0.5, _CARD_RADIUS - 0.5,
         )
-        p.setPen(QPen(QColor(255, 255, 255, 75 if self._hover else 20), 1.0))
+        if self._selected:
+            p.setPen(QPen(QColor(ACCENT), 1.5))
+        elif self._hover:
+            p.setPen(QPen(QColor(255, 255, 255, 75), 1.0))
+        else:
+            p.setPen(QPen(QColor(255, 255, 255, 20), 1.0))
         p.setBrush(Qt.NoBrush)
         p.drawPath(path)
 
@@ -716,17 +740,6 @@ class _ThumbWidget(QWidget):
     def clearImage(self):
         self._orig_px = None
         self.update()
-
-    # Propagate hover to the AssetCard parent
-    def enterEvent(self, e):
-        super().enterEvent(e)
-        if isinstance(self.parent(), AssetCard):
-            self.parent()._onHoverEnter()
-
-    def leaveEvent(self, e):
-        super().leaveEvent(e)
-        if isinstance(self.parent(), AssetCard):
-            self.parent()._onHoverLeave()
 
     def resizeEvent(self, e):
         super().resizeEvent(e)

@@ -269,4 +269,15 @@ QMenu::separator {{
     background: {BORDER_LIGHT};
     margin: 4px 0;
 }}
+
+/* Inspector panel */
+#inspectorPanel {{
+    background: {BG_SECONDARY};
+    border-left: 1px solid {BORDER_LIGHT};
+}}
+
+/* Splitter handle */
+QSplitter::handle {{
+    background: {BORDER_LIGHT};
+}}
 """
