@@ -45,6 +45,7 @@ class AssetCard(QWidget):
         self._current_idx  = 0
         self._selected     = False
         self._hover        = False
+        self._view_mode    = "2d"
         self._scanThumbs()
 
         # Prevent Qt from pre-erasing the widget rect to the palette dark colour
@@ -129,6 +130,11 @@ class AssetCard(QWidget):
         )
         self.thumb_counter.hide()
 
+        # View mode toggle pill
+        self._mode_toggle = _ViewModeToggle(self, height=22)
+        self._mode_toggle.toggled.connect(self._onViewModeToggled)
+        self._mode_toggle.hide()
+
         # ── Info row ──────────────────────────────────────────────────
         info = QWidget()
         info.setAttribute(Qt.WA_NoSystemBackground)
@@ -196,7 +202,10 @@ class AssetCard(QWidget):
         self.thumb_counter.adjustSize()
         self.thumb_counter.move(w - self.thumb_counter.width() - 5, 5)
 
-        for w_ in (self.star_btn, self.arrow_left, self.arrow_right, self.thumb_counter):
+        self._mode_toggle.move(6, thumb_h - 28)
+
+        for w_ in (self.star_btn, self.arrow_left, self.arrow_right, self.thumb_counter,
+                   self._mode_toggle):
             w_.raise_()
         for dot in self._dots.values():
             dot.raise_()
@@ -219,6 +228,8 @@ class AssetCard(QWidget):
             dot.raise_()
         self._refreshArrows()
         self._refreshCounter()
+        self._mode_toggle.show()
+        self._mode_toggle.raise_()
 
     def _onHoverLeave(self):
         if self.underMouse():
@@ -232,6 +243,7 @@ class AssetCard(QWidget):
         self.arrow_left.hide()
         self.arrow_right.hide()
         self.thumb_counter.hide()
+        self._mode_toggle.hide()
 
     def enterEvent(self, e):
         self._onHoverEnter()
@@ -288,6 +300,14 @@ class AssetCard(QWidget):
         self._border.setHover(selected or self._hover)
         self._border.update()
 
+    def _onViewModeToggled(self, mode):
+        self._view_mode = mode
+        self.thumb.setViewMode(mode)
+        if mode == "2d":
+            self._showThumb()
+        self._refreshArrows()
+        self._refreshCounter()
+
     # ── Thumbnail display ───────────────────────────────────────────────
 
     def _showThumb(self):
@@ -298,6 +318,8 @@ class AssetCard(QWidget):
             self.thumb.clearImage()
 
     def _refreshArrows(self):
+        if self._view_mode != "2d":
+            self.arrow_left.hide(); self.arrow_right.hide(); return
         n = len(self._view_thumbs.get(self._current_view, []))
         if n > 1:
             self.arrow_left.show()
@@ -309,6 +331,8 @@ class AssetCard(QWidget):
             self.arrow_right.hide()
 
     def _refreshCounter(self):
+        if self._view_mode == "3d":
+            self.thumb_counter.hide(); return
         images = self._view_thumbs.get(self._current_view, [])
         n = len(images)
         if n > 1:
@@ -513,6 +537,57 @@ class _CounterLabel(QLabel):
         p.drawRoundedRect(QRectF(self.rect()), 8, 8)
         p.end()
         super().paintEvent(e)
+
+
+# ── View mode toggle pill ────────────────────────────────────────────────────
+
+class _ViewModeToggle(QWidget):
+    """Single pill showing current mode ("2D"/"3D"). Click to toggle."""
+    toggled = Signal(str)   # emits "2d" or "3d"
+
+    def __init__(self, parent=None, mode="2d", height=22):
+        super().__init__(parent)
+        self._mode = mode
+        self._hover = False
+        self.setAttribute(Qt.WA_NoSystemBackground)
+        self.setCursor(Qt.PointingHandCursor)
+        pill_w = max(36, int(height * 1.8))
+        self.setFixedSize(pill_w, height)
+
+    def setMode(self, mode):
+        self._mode = mode
+        self.update()
+
+    def mode(self):
+        return self._mode
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        w, h = self.width(), self.height()
+        r = QRectF(0, 0, w, h)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(0, 0, 0, 90 if self._hover else 60))
+        p.drawRoundedRect(r, h / 2, h / 2)
+        font = p.font()
+        font.setPixelSize(max(8, int(h * 0.45)))
+        font.setWeight(60)
+        p.setFont(font)
+        p.setPen(QColor(255, 255, 255, 220))
+        p.drawText(r, Qt.AlignCenter, "2D" if self._mode == "2d" else "3D")
+
+    def enterEvent(self, e):
+        self._hover = True; self.update(); super().enterEvent(e)
+
+    def leaveEvent(self, e):
+        self._hover = False; self.update(); super().leaveEvent(e)
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            self._mode = "3d" if self._mode == "2d" else "2d"
+            self.update()
+            self.toggled.emit(self._mode)
+        super().mousePressEvent(e)
 
 
 # ── Star button ─────────────────────────────────────────────────────────────
@@ -730,6 +805,7 @@ class _ThumbWidget(QWidget):
         super().__init__(parent)
         self.asset_data = asset_data
         self._orig_px   = None
+        self._view_mode = "2d"
         self.setAttribute(Qt.WA_NoSystemBackground)
 
     def setImage(self, path):
@@ -740,6 +816,28 @@ class _ThumbWidget(QWidget):
     def clearImage(self):
         self._orig_px = None
         self.update()
+
+    def setViewMode(self, mode):
+        self._view_mode = mode
+        self.update()
+
+    def _drawCubePlaceholder(self, p):
+        h = self.height()
+        s = max(10, int(h * 0.11))
+        off = max(4, int(s * 0.44))
+        cx, cy = self.width() // 2, h // 2 - off
+        p.setPen(QPen(QColor(255, 255, 255, 40), 1))
+        p.drawRect(cx - s, cy - s, s * 2, s * 2)
+        p.drawRect(cx - s + off, cy - s + off, s * 2, s * 2)
+        p.drawLine(cx - s, cy - s, cx - s + off, cy - s + off)
+        p.drawLine(cx + s, cy - s, cx + s + off, cy - s + off)
+        p.drawLine(cx - s, cy + s, cx - s + off, cy + s + off)
+        p.drawLine(cx + s, cy + s, cx + s + off, cy + s + off)
+        font = p.font()
+        font.setPixelSize(max(9, int(h * 0.075)))
+        p.setFont(font)
+        p.setPen(QColor(255, 255, 255, 50))
+        p.drawText(QRectF(0, cy + s + off + 4, self.width(), 20), Qt.AlignCenter, "3D Preview")
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
@@ -764,7 +862,12 @@ class _ThumbWidget(QWidget):
         clip.closeSubpath()
         p.setClipPath(clip)
 
-        if self._orig_px and not self._orig_px.isNull():
+        if self._view_mode == "3d":
+            idx = self.asset_data.get("id", 0) % len(THUMB_PALETTES)
+            bg, _ = THUMB_PALETTES[idx]
+            p.fillRect(self.rect(), QColor(bg))
+            self._drawCubePlaceholder(p)
+        elif self._orig_px and not self._orig_px.isNull():
             scaled = self._orig_px.scaled(
                 self.width(), self.height(),
                 Qt.KeepAspectRatioByExpanding,

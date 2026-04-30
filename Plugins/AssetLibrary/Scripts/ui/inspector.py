@@ -13,6 +13,7 @@ from ui.styles import (
     BORDER_LIGHT, BORDER_MID, ACCENT, ACCENT_BG, ACCENT_TEXT, ACCENT_BORDER,
     THUMB_PALETTES,
 )
+from ui.asset_card import _ViewModeToggle
 
 _VIEWS = [
     ("material", "#5ba3e0"),
@@ -110,6 +111,7 @@ class InspectorPreview(QWidget):
         self._view_thumbs = {"material": [], "clay": [], "wire": []}
         self._current_idx = 0
         self._hover = False
+        self._view_mode = "2d"
         self.setAttribute(Qt.WA_NoSystemBackground)
         self.setMouseTracking(True)
         self._build()
@@ -143,6 +145,10 @@ class InspectorPreview(QWidget):
         self.fs_btn.clicked.connect(self._onFullscreen)
         self.fs_btn.hide()
 
+        # View mode toggle — always visible (no hide)
+        self._mode_toggle = _ViewModeToggle(self, height=18)
+        self._mode_toggle.toggled.connect(self._onViewModeToggled)
+
         self._positionOverlays()
 
     def _positionOverlays(self):
@@ -163,8 +169,14 @@ class InspectorPreview(QWidget):
 
         self.fs_btn.move(s - 34, s - 34)
 
+        self._mode_toggle.move(8, dy)
+        self._mode_toggle.raise_()
+
     def setAsset(self, asset_data):
         self._asset_data = asset_data
+        if self._view_mode != "2d":
+            self._view_mode = "2d"
+            self._mode_toggle.setMode("2d")
         self._current_view = "material"
         self._current_idx = 0
         self._scanThumbs()
@@ -230,6 +242,8 @@ class InspectorPreview(QWidget):
         self._refreshCounter()
 
     def _refreshArrows(self):
+        if self._view_mode != "2d":
+            self.arrow_left.hide(); self.arrow_right.hide(); return
         n = len(self._view_thumbs.get(self._current_view, []))
         if n > 1:
             self.arrow_left.show()
@@ -273,6 +287,34 @@ class InspectorPreview(QWidget):
         self._refreshArrows()
         self._refreshCounter()
 
+    def _onViewModeToggled(self, mode):
+        self._view_mode = mode
+        if mode == "2d":
+            self._showThumb()
+        else:
+            self._orig_px = None
+        self._refreshArrows()
+        self.update()
+
+    def _drawCubePlaceholder(self, p):
+        scale = self.height() / 160.0
+        s = int(18 * scale)
+        off = int(8 * scale)
+        cx = self.width() // 2
+        cy = self.height() // 2 - off
+        p.setPen(QPen(QColor(255, 255, 255, 40), 1))
+        p.drawRect(cx - s, cy - s, s * 2, s * 2)
+        p.drawRect(cx - s + off, cy - s + off, s * 2, s * 2)
+        p.drawLine(cx - s, cy - s, cx - s + off, cy - s + off)
+        p.drawLine(cx + s, cy - s, cx + s + off, cy - s + off)
+        p.drawLine(cx - s, cy + s, cx - s + off, cy + s + off)
+        p.drawLine(cx + s, cy + s, cx + s + off, cy + s + off)
+        font = p.font()
+        font.setPixelSize(max(12, int(14 * scale)))
+        p.setFont(font)
+        p.setPen(QColor(255, 255, 255, 50))
+        p.drawText(QRectF(0, cy + s + off + 6, self.width(), 24), Qt.AlignCenter, "3D Preview")
+
     def enterEvent(self, e):
         self._hover = True
         for dot in self._dots.values():
@@ -309,7 +351,12 @@ class InspectorPreview(QWidget):
         clip.closeSubpath()
         p.setClipPath(clip)
 
-        if self._orig_px and not self._orig_px.isNull():
+        if self._view_mode == "3d":
+            idx = self._asset_data.get("id", 0) % len(THUMB_PALETTES) if self._asset_data else 0
+            bg, _ = THUMB_PALETTES[idx] if self._asset_data else (BG_TERTIARY, TEXT_TERTIARY)
+            p.fillRect(self.rect(), QColor(bg))
+            self._drawCubePlaceholder(p)
+        elif self._orig_px and not self._orig_px.isNull():
             scaled = self._orig_px.scaled(
                 int(r.width()), int(r.height()),
                 Qt.KeepAspectRatioByExpanding,
