@@ -117,10 +117,10 @@ class SidebarWidget(QWidget):
     # ------------------------------------------------------------------
 
     def setCounts(self, counts):
-        """Update count badges.  counts = {"All": 259, "Models": 114, ...}"""
+        """Update count badges.  counts = {"All": 259, "Models": 114, "favorites": 7, ...}"""
         self._counts = counts
         for item in self._items:
-            key = _countKey(item.cat, item.sub)
+            key = _countKey(item.cat, item.sub, item.special)
             item.setCount(counts.get(key, 0))
 
     def _onItemClicked(self, item):
@@ -134,7 +134,9 @@ class SidebarWidget(QWidget):
         item.setActive(True)
 
 
-def _countKey(cat, sub):
+def _countKey(cat, sub, special=""):
+    if special:
+        return special        # "favorites" or "recent"
     if cat is None and sub is None:
         return "All"
     if sub:

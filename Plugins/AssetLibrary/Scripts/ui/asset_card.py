@@ -485,7 +485,7 @@ class _CounterLabel(QLabel):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         p.setPen(Qt.NoPen)
-        p.setBrush(QColor(0, 0, 0, 97))   # rgba(0,0,0,0.38) — same as arrows
+        p.setBrush(QColor(0, 0, 0, 60))   # subtle — just enough to separate text from image
         p.drawRoundedRect(QRectF(self.rect()), 8, 8)
         p.end()
         super().paintEvent(e)
@@ -657,19 +657,23 @@ class _ArrowBtn(QWidget):
         cx, cy = 22, 22
         # Shadow
         shadow = QRadialGradient(cx, cy + 1, 18)
-        shadow.setColorAt(0.0, QColor(0, 0, 0, 80 if self._hover else 50))
+        shadow.setColorAt(0.0, QColor(0, 0, 0, 35 if self._hover else 21))
         shadow.setColorAt(1.0, QColor(0, 0, 0, 0))
         p.setPen(Qt.NoPen)
         p.setBrush(shadow)
         p.drawEllipse(self.rect())
-        # < or > drawn as two stroked lines with round caps — bevel on ends
-        s = 11   # half-height of the chevron (150% bigger)
+        # < or > drawn as a single path — clean join at the tip
+        s = 11
         tip_x = cx - 4 if not self._mirror else cx + 4
         end_x = cx + 6 if not self._mirror else cx - 6
-        pen = QPen(QColor(255, 255, 255, 230), 3.5, Qt.SolidLine, Qt.RoundCap)
+        path = QPainterPath()
+        path.moveTo(end_x, cy - s)
+        path.lineTo(tip_x, cy)
+        path.lineTo(end_x, cy + s)
+        pen = QPen(QColor(255, 255, 255, 180 if self._hover else 91), 3.5, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
         p.setPen(pen)
-        p.drawLine(tip_x, cy, end_x, cy - s)
-        p.drawLine(tip_x, cy, end_x, cy + s)
+        p.setBrush(Qt.NoBrush)
+        p.drawPath(path)
 
     def enterEvent(self, e):
         self._hover = True

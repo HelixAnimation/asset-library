@@ -306,8 +306,11 @@ class LibraryBrowser(QMainWindow):
         if self._special == "favorites":
             filtered = [c for c in filtered if c._is_fav]
         elif self._special == "recent":
-            # Recent is handled by load order from DB
-            pass
+            recent_ids = set(self._getRecentIds())
+            filtered = [c for c in filtered if c.asset_data.get("id") in recent_ids]
+            # Order by most recently used
+            order = {aid: i for i, aid in enumerate(recent_ids)}
+            filtered.sort(key=lambda c: order.get(c.asset_data.get("id"), 999999))
         else:
             if self._category:
                 filtered = [c for c in filtered
@@ -405,7 +408,21 @@ class LibraryBrowser(QMainWindow):
             self._applyFilters()
 
     def _onAssetImport(self, asset_data):
-        pass  # Phase 4 — DCC bridge
+        asset_id = asset_data.get("id")
+        if asset_id is None:
+            return
+        db = self._getDB()
+        if db is None:
+            return
+        try:
+            db.add_recent(asset_id, self._username)
+        finally:
+            db.close()
+        # Refresh sidebar count and current view if showing recents
+        counts = db.get_category_counts(username=self._username) if db else {}
+        self.sidebar.setCounts(counts)
+        if self._special == "recent":
+            self._applyFilters()
 
     def _onSettingsClicked(self):
         dlg = SettingsDialog(plugin=self.plugin, parent=self)
@@ -443,6 +460,16 @@ class LibraryBrowser(QMainWindow):
         if self.plugin:
             return self.plugin.getDB()
         return None
+
+    def _getRecentIds(self):
+        db = self._getDB()
+        if db is None:
+            return []
+        try:
+            recents = db.get_recents(self._username)
+            return [r["id"] for r in recents]
+        finally:
+            db.close()
 
     def _getUsername(self):
         try:

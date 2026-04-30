@@ -186,6 +186,12 @@ class PublishDialog(QDialog):
         self.author_edit.setPlaceholderText("Your name")
         body_layout.addWidget(self.author_edit)
 
+        # Project
+        body_layout.addWidget(self._field("PROJECT"))
+        self.project_edit = QLineEdit()
+        self.project_edit.setPlaceholderText("Project this asset belongs to")
+        body_layout.addWidget(self.project_edit)
+
         body_layout.addStretch()
         scroll.setWidget(body)
         root.addWidget(scroll, 1)
@@ -231,6 +237,8 @@ class PublishDialog(QDialog):
                 self.sub_combo.setCurrentIndex(idx)
         if self.prefill.get("author"):
             self.author_edit.setText(self.prefill["author"])
+        if self.prefill.get("project"):
+            self.project_edit.setText(self.prefill["project"])
 
     def _onCategoryChanged(self, cat):
         self.sub_combo.clear()
@@ -266,6 +274,7 @@ class PublishDialog(QDialog):
             "has_materials":int(self.chk_mat.isChecked()),
             "tags":         self.tag_container.getTags(),
             "author":       self.author_edit.text().strip(),
+            "project":      self.project_edit.text().strip(),
         }
         if not data["name"] or not data["filepath"]:
             return

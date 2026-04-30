@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _SCHEMA_V1 = """
 PRAGMA foreign_keys = ON;
@@ -74,6 +74,11 @@ CREATE TABLE IF NOT EXISTS versions (
 );
 """
 
+# Migration to v3: adds project column to assets
+_MIGRATION_V3 = """
+ALTER TABLE assets ADD COLUMN project TEXT;
+"""
+
 
 def _now():
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -132,6 +137,11 @@ class AssetDB:
         if current < 2:
             self.conn.executescript(_MIGRATION_V2)
             self.conn.execute("UPDATE schema_version SET version = 2")
+            self.conn.commit()
+
+        if current < 3:
+            self.conn.executescript(_MIGRATION_V3)
+            self.conn.execute("UPDATE schema_version SET version = 3")
             self.conn.commit()
 
     # ------------------------------------------------------------------
@@ -224,7 +234,8 @@ class AssetDB:
         cols = [
             "name", "category", "subcategory", "filepath", "filetype",
             "renderer", "dcc", "has_rig", "has_textures", "has_materials",
-            "version", "author", "thumbnail_path", "prism_path", "created_at", "updated_at",
+            "version", "author", "thumbnail_path", "prism_path", "project",
+            "created_at", "updated_at",
         ]
         values = [data.get(c) for c in cols]
         placeholders = ",".join("?" * len(cols))
@@ -404,4 +415,13 @@ class AssetDB:
                 counts["%s/%s" % (cat, sub)] = cnt
 
         counts["All"] = self.conn.execute("SELECT COUNT(*) FROM assets").fetchone()[0]
+
+        if username:
+            counts["favorites"] = self.conn.execute(
+                "SELECT COUNT(*) FROM favorites WHERE username = ?", (username,)
+            ).fetchone()[0]
+            counts["recent"] = self.conn.execute(
+                "SELECT COUNT(*) FROM recently_used WHERE username = ?", (username,)
+            ).fetchone()[0]
+
         return counts
