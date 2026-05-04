@@ -111,6 +111,7 @@ class InspectorPanel(QWidget):
         self.version_combo.setMaxVisibleItems(10)
         self.version_combo.view().setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.version_combo.view().setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.version_combo.view().setAutoScroll(False)
         self.version_combo.setStyleSheet(
             "QComboBox { background: %s; border: 1px solid %s; border-radius: 4px;"
             " padding: 2px 6px; color: %s; font-size: 11px;"
