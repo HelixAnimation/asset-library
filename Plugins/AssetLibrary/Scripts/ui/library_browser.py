@@ -121,7 +121,7 @@ class LibraryBrowser(QMainWindow):
         _shadow = QGraphicsDropShadowEffect(self.inspector)
         _shadow.setBlurRadius(24)
         _shadow.setOffset(-6, 0)
-        _shadow.setColor(QColor(0, 0, 0, 100))
+        _shadow.setColor(QColor(0, 0, 0, 60))
         self.inspector.setGraphicsEffect(_shadow)
 
         body_layout.addWidget(self.inspector)
