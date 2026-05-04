@@ -47,6 +47,7 @@ class _VersionCombo(QComboBox):
     """QComboBox that styles the popup container frame directly so borders render on all sides."""
     def showPopup(self):
         super().showPopup()
+        self.view().scrollToTop()
         container = self.view().parentWidget()
         if container and container is not self:
             container.setObjectName("_verPopup")
