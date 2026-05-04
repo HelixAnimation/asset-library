@@ -44,13 +44,15 @@ def _asset_palette_index(asset_data):
 
 
 class _VersionCombo(QComboBox):
-    """QComboBox that widens its popup by 1px so the right border is not clipped on Windows."""
+    """QComboBox that styles the popup container frame directly so borders render on all sides."""
     def showPopup(self):
         super().showPopup()
-        popup = self.view().window()
-        if popup is not self:
-            geo = popup.geometry()
-            popup.setGeometry(geo.adjusted(0, 0, 1, 0))
+        container = self.view().parentWidget()
+        if container and container is not self:
+            container.setStyleSheet(
+                "QWidget { border: 1px solid %s; border-radius: 4px;"
+                " background: %s; }" % (BORDER_MID, BG_PRIMARY)
+            )
 
 
 class InspectorPanel(QWidget):
@@ -111,14 +113,14 @@ class InspectorPanel(QWidget):
             "QComboBox::down-arrow { image: none; border-left: 3px solid transparent;"
             " border-right: 3px solid transparent; border-top: 4px solid %s;"
             " width: 0; height: 0; }"
-            "QComboBox QAbstractItemView { background: %s; border: 1px solid %s;"
+            "QComboBox QAbstractItemView { background: %s; border: none;"
             " color: %s; selection-background-color: %s; selection-color: %s;"
             " padding: 2px; outline: none; }"
             "QComboBox QAbstractItemView::item { padding: 3px 6px; }"
             "QComboBox QAbstractItemView::item:selected { background: %s; }"
             % (BG_PRIMARY, BORDER_LIGHT, TEXT_SECONDARY,
                BORDER_MID, TEXT_TERTIARY,
-               BG_PRIMARY, BORDER_MID, TEXT_PRIMARY, ACCENT_BG, ACCENT_TEXT,
+               BG_PRIMARY, TEXT_PRIMARY, ACCENT_BG, ACCENT_TEXT,
                ACCENT_BG)
         )
         self.version_combo.hide()
