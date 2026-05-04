@@ -1,9 +1,19 @@
 """Design tokens and QSS stylesheet matching the HTML mockup (dark mode)."""
 
+from qtpy.QtWidgets import QStyledItemDelegate, QStyle
+
+
+class _NoFocusDelegate(QStyledItemDelegate):
+    """Item delegate that never draws the focus rectangle."""
+    def paint(self, painter, option, index):
+        option.state &= ~QStyle.State_HasFocus
+        super().paint(painter, option, index)
+
 # ── Colours ──────────────────────────────────────────────────────────────────
-BG_PRIMARY   = "#1e1e1c"
-BG_SECONDARY = "#252523"
+BG_PRIMARY   = "#242424"
+BG_SECONDARY = "#2f2f2f"
 BG_TERTIARY  = "#2c2c2a"
+BG_SIDEBAR   = "#1a1a1a"
 
 TEXT_PRIMARY   = "#e8e8e4"
 TEXT_SECONDARY = "#a0a09a"
@@ -82,21 +92,8 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
 /* Toolbar */
 #toolbar {{
     background-color: {BG_SECONDARY};
-    border-bottom: 1px solid {BORDER_LIGHT};
 }}
 
-/* Search input */
-#searchInput {{
-    background-color: {BG_PRIMARY};
-    border: 1px solid {BORDER_LIGHT};
-    border-radius: 6px;
-    padding: 4px 8px 4px 26px;
-    color: {TEXT_PRIMARY};
-    font-size: 12px;
-}}
-#searchInput:focus {{
-    border-color: {BORDER_MID};
-}}
 
 /* Sort / combo */
 QComboBox {{
@@ -107,6 +104,11 @@ QComboBox {{
     color: {TEXT_SECONDARY};
     font-size: 12px;
     min-width: 80px;
+    outline: none;
+}}
+QComboBox:focus, QComboBox:on {{
+    border-color: {BORDER_MID};
+    outline: none;
 }}
 QComboBox:hover {{
     border-color: {BORDER_MID};
@@ -114,6 +116,7 @@ QComboBox:hover {{
 QComboBox::drop-down {{
     border: none;
     width: 18px;
+    background: transparent;
 }}
 QComboBox::down-arrow {{
     image: none;
@@ -132,6 +135,14 @@ QComboBox QAbstractItemView {{
     selection-background-color: {ACCENT_BG};
     selection-color: {ACCENT_TEXT};
     padding: 4px;
+    outline: none;
+}}
+QComboBox QAbstractItemView::item {{
+    outline: none;
+}}
+QComboBox QAbstractItemView::item:selected {{
+    background: {ACCENT_BG};
+    outline: none;
 }}
 
 /* Slider */
@@ -207,8 +218,7 @@ QPushButton:pressed {{
 
 /* Sidebar */
 #sidebar {{
-    background-color: {BG_SECONDARY};
-    border-right: 1px solid {BORDER_LIGHT};
+    background-color: {BG_SIDEBAR};
 }}
 
 /* Status bar */
@@ -272,7 +282,7 @@ QMenu::separator {{
 
 /* Inspector panel */
 #inspectorPanel {{
-    background: {BG_SECONDARY};
+    background: {BG_PRIMARY};
     border-left: 1px solid {BORDER_LIGHT};
 }}
 
