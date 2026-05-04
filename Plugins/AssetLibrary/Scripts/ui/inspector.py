@@ -49,11 +49,13 @@ class _VersionCombo(QComboBox):
         super().showPopup()
         container = self.view().parentWidget()
         if container and container is not self:
+            container.setObjectName("_verPopup")
             container.setStyleSheet(
-                "QWidget { border: 1px solid %s; border-radius: 4px;"
+                "#_verPopup { border: 1px solid %s; border-radius: 4px;"
                 " background: %s; }"
+                "QAbstractItemView { border: none; background: %s; }"
                 "QScrollBar { width: 0; height: 0; border: none; }"
-                % (BORDER_MID, BG_PRIMARY)
+                % (BORDER_MID, BG_PRIMARY, BG_PRIMARY)
             )
 
 
