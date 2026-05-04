@@ -651,11 +651,16 @@ class _FlowWidget(QWidget):
             self.setMinimumHeight(80)
             return
 
-        avail = max(1, self.width() - 2 * self._PADDING)
-        cols  = max(1, (avail + self._GAP) // (self._card_width + self._GAP))
-        cols  = min(cols, len(self._cards))   # never leave empty columns
-        actual_w = int((avail - (cols - 1) * self._GAP) / cols)
-        actual_w = max(_CARD_WIDTH_MIN, min(actual_w, self._card_width))
+        avail    = max(1, self.width() - 2 * self._PADDING)
+        fit_cols = max(1, (avail + self._GAP) // (self._card_width + self._GAP))
+
+        if len(self._cards) < fit_cols:
+            # Partial row — don't stretch, just place at set width
+            cols     = len(self._cards)
+            actual_w = self._card_width
+        else:
+            cols     = fit_cols
+            actual_w = max(_CARD_WIDTH_MIN, int((avail - (cols - 1) * self._GAP) / cols))
 
         for i, card in enumerate(self._cards):
             card.setCardWidth(actual_w)
