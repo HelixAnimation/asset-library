@@ -1,19 +1,21 @@
 import os
+import logging
 
 from qtpy.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QScrollArea, QFrame, QSizePolicy, QDialog,
+    QGraphicsDropShadowEffect, QComboBox, QMenu,
 )
-from qtpy.QtCore import Qt, Signal, QRectF
+from qtpy.QtCore import Qt, Signal, QRectF, QMimeData
 from qtpy.QtGui import QPixmap, QColor, QPainter, QPainterPath, QPen
+from qtpy.QtWidgets import QApplication
 
 from ui.styles import (
     BG_PRIMARY, BG_SECONDARY, BG_TERTIARY,
     TEXT_PRIMARY, TEXT_SECONDARY, TEXT_TERTIARY,
     BORDER_LIGHT, BORDER_MID, ACCENT, ACCENT_BG, ACCENT_TEXT, ACCENT_BORDER,
-    THUMB_PALETTES,
+    THUMB_PALETTES, _NoFocusDelegate,
 )
-from ui.asset_card import _ViewModeToggle
 
 _VIEWS = [
     ("material", "#5ba3e0"),
@@ -21,15 +23,34 @@ _VIEWS = [
     ("wire",     "#5dc8a0"),
 ]
 
-_PREVIEW_SIZE = 310
+_PREVIEW_SIZE = 340
+
+logger = logging.getLogger(__name__)
+
+
+def _text(value, default=""):
+    if value is None:
+        return default
+    return str(value)
+
+
+def _asset_palette_index(asset_data):
+    if not asset_data:
+        return 0
+    try:
+        return int(asset_data.get("id") or 0) % len(THUMB_PALETTES)
+    except (TypeError, ValueError):
+        return 0
 
 
 class InspectorPanel(QWidget):
     closeRequested = Signal()
+    tagClicked = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("inspectorPanel")
+        self.setAttribute(Qt.WA_StyledBackground, True)
         self.setFixedWidth(340)
         self._asset_data = None
         self._build()
@@ -39,68 +60,198 @@ class InspectorPanel(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # Header bar
+        # Preview — fixed above scroll area so the scrollbar can never overlap it
+        preview_wrap = QWidget()
+        preview_wrap.setFixedHeight(_PREVIEW_SIZE)
+        preview_wrap.setStyleSheet("background: transparent;")
+        self.preview = InspectorPreview(preview_wrap)
+        self.preview.setGeometry(0, 0, _PREVIEW_SIZE, _PREVIEW_SIZE)
+        self.preview.closeClicked.connect(self.closeRequested.emit)
+        root.addWidget(preview_wrap)
+
+        # Fixed name + category + version below thumbnail (never scrolls)
         header = QWidget()
-        header.setFixedHeight(36)
+        header.setAttribute(Qt.WA_StyledBackground, True)
         header.setStyleSheet("background: %s;" % BG_SECONDARY)
-        h_layout = QHBoxLayout(header)
-        h_layout.setContentsMargins(12, 0, 8, 0)
-        title = QLabel("Inspector")
-        title.setStyleSheet(
-            "font-size: 11px; font-weight: 500; color: %s; background: transparent;"
+        header_outer = QVBoxLayout(header)
+        header_outer.setContentsMargins(14, 10, 14, 10)
+        header_outer.setSpacing(2)
+
+        # Row: name (left) + version combo (right)
+        title_row = QHBoxLayout()
+        title_row.setSpacing(8)
+        self.name_label = QLabel("")
+        self.name_label.setWordWrap(True)
+        self.name_label.setStyleSheet(
+            "font-size: 15px; font-weight: 600; color: %s; background: transparent;"
+            % TEXT_PRIMARY
+        )
+        title_row.addWidget(self.name_label, 1)
+
+        self.version_combo = QComboBox()
+        self.version_combo.setFixedWidth(70)
+        self.version_combo.view().setFocusPolicy(Qt.NoFocus)
+        self.version_combo.view().setItemDelegate(_NoFocusDelegate(self.version_combo))
+        self.version_combo.setStyleSheet(
+            "QComboBox { background: %s; border: 1px solid %s; border-radius: 4px;"
+            " padding: 2px 6px; color: %s; font-size: 11px;"
+            " font-family: 'IBM Plex Mono', monospace; min-width: 60px; outline: none; }"
+            "QComboBox:focus, QComboBox:on { border: 1px solid %s; }"
+            "QComboBox::drop-down { border: none; width: 16px; background: transparent; }"
+            "QComboBox::down-arrow { image: none; border-left: 3px solid transparent;"
+            " border-right: 3px solid transparent; border-top: 4px solid %s;"
+            " width: 0; height: 0; }"
+            "QComboBox QAbstractItemView { background: %s;"
+            " border-top: 1px solid %s; border-left: 1px solid %s;"
+            " border-bottom: 1px solid %s; border-right: 1px solid %s;"
+            " color: %s; selection-background-color: %s; selection-color: %s;"
+            " padding: 2px; outline: none; }"
+            "QComboBox QAbstractItemView::item { padding: 3px 6px; }"
+            "QComboBox QAbstractItemView::item:selected { background: %s; }"
+            % (BG_PRIMARY, BORDER_LIGHT, TEXT_SECONDARY,
+               BORDER_MID, TEXT_TERTIARY,
+               BG_PRIMARY, BORDER_MID, BORDER_MID, BORDER_MID, BORDER_MID,
+               TEXT_PRIMARY, ACCENT_BG, ACCENT_TEXT,
+               ACCENT_BG)
+        )
+        self.version_combo.hide()
+        title_row.addWidget(self.version_combo)
+
+        self.more_btn = QLabel("⋮")
+        self.more_btn.setFixedSize(22, 22)
+        self.more_btn.setAlignment(Qt.AlignCenter)
+        self.more_btn.setCursor(Qt.PointingHandCursor)
+        self.more_btn.setStyleSheet(
+            "color: %s; font-size: 16px; background: transparent;"
+            " border-radius: 4px;" % TEXT_TERTIARY
+        )
+        self.more_btn.hide()
+        self.more_btn.mousePressEvent = self._onMoreClicked
+        title_row.addWidget(self.more_btn)
+
+        header_outer.addLayout(title_row)
+
+        self.category_label = QLabel("")
+        self.category_label.setStyleSheet(
+            "font-size: 11px; color: %s; background: transparent;"
             % TEXT_TERTIARY
         )
-        h_layout.addWidget(title)
-        h_layout.addStretch()
-        close_btn = QPushButton("X")
-        close_btn.setFixedSize(20, 20)
-        close_btn.setStyleSheet(
-            "border: none; background: transparent; color: %s; font-size: 12px;"
-            % TEXT_TERTIARY
-        )
-        close_btn.clicked.connect(self.closeRequested.emit)
-        h_layout.addWidget(close_btn)
+        header_outer.addWidget(self.category_label)
         root.addWidget(header)
 
-        # Scrollable body
+        # Scrollable metadata only
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setStyleSheet(
-            "QScrollArea { background: %s; border: none; }" % BG_SECONDARY
+            "QScrollArea { background: %s; border: none; }" % BG_PRIMARY
         )
 
         body = QWidget()
-        body.setStyleSheet("background: %s;" % BG_SECONDARY)
-        self._body_layout = QVBoxLayout(body)
-        self._body_layout.setContentsMargins(14, 10, 14, 14)
-        self._body_layout.setSpacing(10)
-
-        # Preview
-        self.preview = InspectorPreview()
-        self._body_layout.addWidget(self.preview, 0, Qt.AlignHCenter)
-
-        # Metadata
+        body.setStyleSheet("background: %s;" % BG_PRIMARY)
+        body_layout = QVBoxLayout(body)
+        body_layout.setContentsMargins(14, 10, 14, 14)
+        body_layout.setSpacing(0)
         self.metadata = _MetadataSection()
-        self._body_layout.addWidget(self.metadata)
+        self.metadata.tagClicked.connect(self.tagClicked.emit)
+        body_layout.addWidget(self.metadata)
+        body_layout.addStretch()
 
-        # 3D viewport placeholder
-        self.viewport = _ViewportPlaceholder()
-        self._body_layout.addWidget(self.viewport)
-
-        self._body_layout.addStretch()
         scroll.setWidget(body)
         root.addWidget(scroll, 1)
 
-    def setAsset(self, asset_data):
+    def setAsset(self, asset_data, versions=None):
         self._asset_data = asset_data
         self.preview.setAsset(asset_data)
         self.metadata.setAsset(asset_data)
 
+        if asset_data:
+            name = _text(asset_data.get("name"))
+            self.name_label.setText(name)
+            cat = _text(asset_data.get("category"))
+            sub = _text(asset_data.get("subcategory"))
+            cat_text = cat + (" / " + sub if sub else "")
+            self.category_label.setText(cat_text)
+
+            # Version combo
+            versions = versions or []
+            self.version_combo.blockSignals(True)
+            self.version_combo.clear()
+            if versions:
+                seen = set()
+                for v in versions:
+                    ver_str = v.get("version", "")
+                    if ver_str and ver_str not in seen:
+                        seen.add(ver_str)
+                        self.version_combo.addItem(ver_str)
+                # Select latest (first, since sorted DESC)
+                self.version_combo.setCurrentIndex(0)
+                self.version_combo.show()
+                self.more_btn.show()
+            else:
+                self.version_combo.hide()
+                self.more_btn.hide()
+            self.version_combo.blockSignals(False)
+        else:
+            self.name_label.setText("")
+            self.category_label.setText("")
+            self.version_combo.hide()
+            self.more_btn.hide()
+
+    def _onMoreClicked(self, e):
+        if e.button() != Qt.LeftButton:
+            return
+        menu = QMenu(self)
+        menu.setStyleSheet(
+            "QMenu { background-color: #242424; border: 1px solid %s; border-radius: 6px;"
+            " padding: 4px 0; color: %s; font-size: 12px; outline: none; }"
+            "QMenu::item { padding: 5px 20px 5px 12px; background: transparent; outline: none; }"
+            "QMenu::item:selected { background-color: %s; color: %s; outline: none; }"
+            % (BORDER_MID, TEXT_SECONDARY, ACCENT_BG, ACCENT_TEXT)
+        )
+        act_explorer = menu.addAction("Open in Explorer")
+        act_copy = menu.addAction("Copy Link")
+        action = menu.exec_(self.more_btn.mapToGlobal(self.more_btn.rect().bottomLeft()))
+        if action == act_explorer:
+            self._openInExplorer()
+        elif action == act_copy:
+            self._copyLink()
+
+    def _getCurrentFilepath(self):
+        if not self._asset_data:
+            return None
+        ver = self.version_combo.currentText()
+        filepath = self._asset_data.get("filepath", "")
+        lib_root = self._asset_data.get("_lib_root", "")
+        if lib_root and not os.path.isabs(filepath):
+            filepath = os.path.join(lib_root, filepath)
+        return filepath
+
+    def _openInExplorer(self):
+        filepath = self._getCurrentFilepath()
+        if not filepath:
+            return
+        import subprocess
+        folder = os.path.dirname(filepath)
+        if folder and os.path.isdir(folder):
+            subprocess.Popen('explorer /select,"%s"' % os.path.normpath(filepath))
+        elif os.path.isdir(filepath):
+            subprocess.Popen('explorer "%s"' % os.path.normpath(filepath))
+
+    def _copyLink(self):
+        filepath = self._getCurrentFilepath()
+        if not filepath:
+            return
+        mime = QMimeData()
+        mime.setText(filepath)
+        QApplication.clipboard().setMimeData(mime)
+
 
 class InspectorPreview(QWidget):
     """Large thumbnail preview with gallery controls and fullscreen button."""
+
+    closeClicked = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -112,13 +263,11 @@ class InspectorPreview(QWidget):
         self._current_idx = 0
         self._hover = False
         self._view_mode = "2d"
-        self.setAttribute(Qt.WA_NoSystemBackground)
+        self.setAttribute(Qt.WA_StyledBackground, False)
         self.setMouseTracking(True)
         self._build()
 
     def _build(self):
-        self._radius = 8
-
         # Arrows
         self.arrow_left = _InspArrowBtn(self, mirror=False)
         self.arrow_right = _InspArrowBtn(self, mirror=True)
@@ -135,19 +284,24 @@ class InspectorPreview(QWidget):
             dot.hide()
             self._dots[view] = dot
 
+        self.mode_btn = _ModeBtn(self, width=34, height=22, font_size=12)
+        self.mode_btn.clicked.connect(self._toggleViewMode)
+        self.mode_btn.hide()
+
         # Counter
         self.counter = _InspCounter(self)
         self.counter.hide()
 
-        # Fullscreen button
+        # Fullscreen button — bottom-left
         self.fs_btn = _ExpandBtn(self)
         self.fs_btn.setToolTip("Fullscreen preview")
         self.fs_btn.clicked.connect(self._onFullscreen)
         self.fs_btn.hide()
 
-        # View mode toggle — always visible (no hide)
-        self._mode_toggle = _ViewModeToggle(self, height=18)
-        self._mode_toggle.toggled.connect(self._onViewModeToggled)
+        # Close button — top-right, shown on hover
+        self.close_btn = _InspCloseBtn(self)
+        self.close_btn.clicked.connect(self.closeClicked.emit)
+        self.close_btn.hide()
 
         self._positionOverlays()
 
@@ -158,25 +312,28 @@ class InspectorPreview(QWidget):
         self.arrow_right.move(s - 50, mid_y)
 
         dot_size, dot_gap = 18, 8
-        total = len(_VIEWS) * dot_size + (len(_VIEWS) - 1) * dot_gap
+        mode_gap = 7
+        mode_w = self.mode_btn.width()
+        total = mode_w + mode_gap + len(_VIEWS) * dot_size + (len(_VIEWS) - 1) * dot_gap
         dx = (s - total) // 2
         dy = s - 28
+        self.mode_btn.move(dx, dy + (dot_size - self.mode_btn.height()) // 2)
         for i, (view, _) in enumerate(_VIEWS):
-            self._dots[view].move(dx + i * (dot_size + dot_gap), dy)
+            x = dx + mode_w + mode_gap + i * (dot_size + dot_gap)
+            self._dots[view].move(x, dy)
 
         self.counter.adjustSize()
-        self.counter.move(s - self.counter.width() - 6, 6)
+        self.counter.move(6, s - self.counter.height() - 6)
 
-        self.fs_btn.move(s - 34, s - 34)
+        # Fullscreen — bottom-right
+        self.fs_btn.move(s - self.fs_btn.width() - 6, s - self.fs_btn.height() - 6)
 
-        self._mode_toggle.move(8, dy)
-        self._mode_toggle.raise_()
+        # Close — top-right
+        self.close_btn.move(s - self.close_btn.width() - 6, 6)
 
     def setAsset(self, asset_data):
         self._asset_data = asset_data
-        if self._view_mode != "2d":
-            self._view_mode = "2d"
-            self._mode_toggle.setMode("2d")
+        self.setViewMode("2d")
         self._current_view = "material"
         self._current_idx = 0
         self._scanThumbs()
@@ -198,7 +355,12 @@ class InspectorPreview(QWidget):
         if os.path.isfile(tp):
             self._view_thumbs["material"] = [tp]
         elif os.path.isdir(tp):
-            for fname in sorted(os.listdir(tp)):
+            try:
+                names = sorted(os.listdir(tp))
+            except OSError as exc:
+                logger.warning("Could not scan inspector thumbnails at %s: %s", tp, exc)
+                return
+            for fname in names:
                 low = fname.lower()
                 if not low.endswith((".png", ".jpg", ".jpeg")):
                     continue
@@ -243,7 +405,9 @@ class InspectorPreview(QWidget):
 
     def _refreshArrows(self):
         if self._view_mode != "2d":
-            self.arrow_left.hide(); self.arrow_right.hide(); return
+            self.arrow_left.hide()
+            self.arrow_right.hide()
+            return
         n = len(self._view_thumbs.get(self._current_view, []))
         if n > 1:
             self.arrow_left.show()
@@ -253,12 +417,15 @@ class InspectorPreview(QWidget):
             self.arrow_right.hide()
 
     def _refreshCounter(self):
+        if self._view_mode != "2d":
+            self.counter.hide()
+            return
         images = self._view_thumbs.get(self._current_view, [])
         n = len(images)
         if n > 1:
             self.counter.setText("%d/%d" % (self._current_idx + 1, n))
             self.counter.adjustSize()
-            self.counter.move(_PREVIEW_SIZE - self.counter.width() - 6, 6)
+            self.counter.move(6, _PREVIEW_SIZE - self.counter.height() - 6)
             self.counter.show()
         else:
             self.counter.hide()
@@ -287,14 +454,22 @@ class InspectorPreview(QWidget):
         self._refreshArrows()
         self._refreshCounter()
 
-    def _onViewModeToggled(self, mode):
-        self._view_mode = mode
-        if mode == "2d":
+    def viewMode(self):
+        return self._view_mode
+
+    def setViewMode(self, mode):
+        self._view_mode = "3d" if mode == "3d" else "2d"
+        self.mode_btn.setMode(self._view_mode)
+        if self._view_mode == "2d":
             self._showThumb()
         else:
             self._orig_px = None
         self._refreshArrows()
+        self._refreshCounter()
         self.update()
+
+    def _toggleViewMode(self):
+        self.setViewMode("3d" if self._view_mode == "2d" else "2d")
 
     def _drawCubePlaceholder(self, p):
         scale = self.height() / 160.0
@@ -317,13 +492,19 @@ class InspectorPreview(QWidget):
 
     def enterEvent(self, e):
         self._hover = True
-        for dot in self._dots.values():
-            if dot._available:
-                dot.show()
+        self.mode_btn.show()
+        self.mode_btn.raise_()
+        if self._view_mode == "2d":
+            for dot in self._dots.values():
+                if dot._available:
+                    dot.show()
         self._refreshArrows()
         self._refreshCounter()
-        self.fs_btn.show()
-        self.fs_btn.raise_()
+        if self._view_mode == "2d":
+            self.fs_btn.show()
+            self.fs_btn.raise_()
+        self.close_btn.show()
+        self.close_btn.raise_()
 
     def leaveEvent(self, e):
         self._hover = False
@@ -333,6 +514,8 @@ class InspectorPreview(QWidget):
         self.arrow_right.hide()
         self.counter.hide()
         self.fs_btn.hide()
+        self.mode_btn.hide()
+        self.close_btn.hide()
 
     def paintEvent(self, _e):
         p = QPainter(self)
@@ -340,19 +523,9 @@ class InspectorPreview(QWidget):
         p.setRenderHint(QPainter.SmoothPixmapTransform)
 
         r = QRectF(self.rect())
-        d = self._radius * 2.0
-        clip = QPainterPath()
-        clip.moveTo(r.left() + self._radius, r.top())
-        clip.lineTo(r.right() - self._radius, r.top())
-        clip.arcTo(r.right() - d, r.top(), d, d, 90, -90)
-        clip.lineTo(r.right(), r.bottom())
-        clip.lineTo(r.left(), r.bottom())
-        clip.arcTo(r.left(), r.top(), d, d, 180, -90)
-        clip.closeSubpath()
-        p.setClipPath(clip)
 
         if self._view_mode == "3d":
-            idx = self._asset_data.get("id", 0) % len(THUMB_PALETTES) if self._asset_data else 0
+            idx = _asset_palette_index(self._asset_data)
             bg, _ = THUMB_PALETTES[idx] if self._asset_data else (BG_TERTIARY, TEXT_TERTIARY)
             p.fillRect(self.rect(), QColor(bg))
             self._drawCubePlaceholder(p)
@@ -368,7 +541,7 @@ class InspectorPreview(QWidget):
         else:
             # Placeholder
             if self._asset_data:
-                idx = self._asset_data.get("id", 0) % len(THUMB_PALETTES)
+                idx = _asset_palette_index(self._asset_data)
                 bg, fg = THUMB_PALETTES[idx]
             else:
                 bg, fg = BG_TERTIARY, TEXT_TERTIARY
@@ -378,7 +551,7 @@ class InspectorPreview(QWidget):
                 font.setPixelSize(40)
                 p.setFont(font)
                 p.setPen(QColor(fg))
-                name = self._asset_data.get("name") or "?"
+                name = _text(self._asset_data.get("name"), "?") or "?"
                 p.drawText(r, Qt.AlignCenter, name[0].upper())
 
 
@@ -391,7 +564,7 @@ class _InspArrowBtn(QWidget):
         self._hover = False
         self.setFixedSize(44, 44)
         self.setCursor(Qt.PointingHandCursor)
-        self.setAttribute(Qt.WA_NoSystemBackground)
+        self.setAttribute(Qt.WA_TranslucentBackground)
 
     def paintEvent(self, _e):
         from qtpy.QtGui import QRadialGradient
@@ -449,7 +622,7 @@ class _InspDotBtn(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedSize(18, 18)
-        self.setAttribute(Qt.WA_NoSystemBackground)
+        self.setAttribute(Qt.WA_TranslucentBackground)
         self._view = ""
         self._active = False
         self._available = False
@@ -503,7 +676,7 @@ class _InspDotBtn(QWidget):
 class _InspCounter(QLabel):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setAttribute(Qt.WA_NoSystemBackground)
+        self.setAttribute(Qt.WA_TranslucentBackground)
         self.setStyleSheet(
             "color: white; font-size: 12px;"
             " font-family: 'IBM Plex Mono', monospace; padding: 2px 8px;"
@@ -519,6 +692,59 @@ class _InspCounter(QLabel):
         super().paintEvent(e)
 
 
+class _ModeBtn(QWidget):
+    clicked = Signal()
+
+    def __init__(self, parent=None, width=34, height=22, font_size=12):
+        super().__init__(parent)
+        self._mode = "2d"
+        self._hover = False
+        self._font_size = font_size
+        self.setFixedSize(width, height)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self._label = QLabel("2D", self)
+        self._label.setAlignment(Qt.AlignCenter)
+        self._label.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self._label.setStyleSheet(
+            "background: transparent; color: white; font-size: %dpx;"
+            " font-weight: 600; padding: 0; margin: 0;" % font_size
+        )
+        self._label.setGeometry(0, 0, width, height)
+
+    def setMode(self, mode):
+        self._mode = "3d" if mode == "3d" else "2d"
+        self._label.setText("3D" if self._mode == "3d" else "2D")
+        self.update()
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+
+        r = QRectF(self.rect()).adjusted(0.75, 0.75, -0.75, -0.75)
+        radius = min(6.0, r.height() / 2.6)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(0, 0, 0, 124 if self._hover else 86))
+        p.drawRoundedRect(r, radius, radius)
+
+    def enterEvent(self, e):
+        self._hover = True
+        self.update()
+        super().enterEvent(e)
+
+    def leaveEvent(self, e):
+        self._hover = False
+        self.update()
+        super().leaveEvent(e)
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            self.clicked.emit()
+            e.accept()
+            return
+        super().mousePressEvent(e)
+
+
 class FullscreenPreviewDialog(QDialog):
     imageChanged = Signal(str, int)  # (view, idx)
 
@@ -531,6 +757,7 @@ class FullscreenPreviewDialog(QDialog):
         self._view_thumbs = view_thumbs
         self._current_view = current_view
         self._current_idx = current_idx
+        self._view_mode = "2d"
         self.setAttribute(Qt.WA_DeleteOnClose)
         self.setStyleSheet("background: #1a1a1a;")
         self.setMouseTracking(True)
@@ -567,6 +794,9 @@ class FullscreenPreviewDialog(QDialog):
             " font-family: 'IBM Plex Mono', monospace; padding: 6px 20px;"
         )
 
+        self._mode_btn = _ModeBtn(self, width=74, height=44, font_size=22)
+        self._mode_btn.clicked.connect(self._toggleViewMode)
+
         self._close_btn = _FsCloseBtn(self)
         self._close_btn.clicked.connect(self.close)
 
@@ -581,18 +811,24 @@ class FullscreenPreviewDialog(QDialog):
         self._arrow_right.move(w - 156, (h - 132) // 2)
 
         dot_size, dot_gap = 54, 16
-        total = len(_VIEWS) * dot_size + (len(_VIEWS) - 1) * dot_gap
+        mode_gap = 16
+        mode_w = self._mode_btn.width()
+        total = mode_w + mode_gap + len(_VIEWS) * dot_size + (len(_VIEWS) - 1) * dot_gap
         dx = (w - total) // 2
+        dy = h - 80
+        self._mode_btn.move(dx, dy + (dot_size - self._mode_btn.height()) // 2)
         for i, (view, _) in enumerate(_VIEWS):
-            self._dots[view].move(dx + i * (dot_size + dot_gap), h - 80)
+            x = dx + mode_w + mode_gap + i * (dot_size + dot_gap)
+            self._dots[view].move(x, dy)
 
         close_x = w - 64
         self._close_btn.move(close_x, 16)
 
         self._counter.adjustSize()
-        self._counter.move(close_x - self._counter.width() - 12, 24)
+        self._counter.move(24, h - self._counter.height() - 24)
 
-        for w_ in (self._arrow_left, self._arrow_right, self._counter, self._close_btn):
+        for w_ in (self._arrow_left, self._arrow_right, self._counter, self._close_btn,
+                   self._mode_btn):
             w_.raise_()
         for dot in self._dots.values():
             dot.raise_()
@@ -650,11 +886,18 @@ class FullscreenPreviewDialog(QDialog):
         self.update()
 
     def _refreshArrows(self):
+        if self._view_mode != "2d":
+            self._arrow_left.hide()
+            self._arrow_right.hide()
+            return
         n = len(self._view_thumbs.get(self._current_view, []))
         self._arrow_left.setVisible(n > 1)
         self._arrow_right.setVisible(n > 1)
 
     def _refreshCounter(self):
+        if self._view_mode != "2d":
+            self._counter.hide()
+            return
         images = self._view_thumbs.get(self._current_view, [])
         n = len(images)
         if n > 1:
@@ -669,6 +912,18 @@ class FullscreenPreviewDialog(QDialog):
             has = bool(self._view_thumbs.get(view))
             active = (view == self._current_view) and has
             self._dots[view].setState(view, active, has)
+
+    def _toggleViewMode(self):
+        self._view_mode = "3d" if self._view_mode == "2d" else "2d"
+        self._mode_btn.setMode(self._view_mode)
+        if self._view_mode == "2d":
+            self._loadImage()
+        else:
+            self._orig_px = None
+        self._resetView()
+        self._refreshArrows()
+        self._refreshCounter()
+        self.update()
 
     # ── Zoom / pan helpers ─────────────────────────────────────────────────
 
@@ -693,13 +948,35 @@ class FullscreenPreviewDialog(QDialog):
         p.setRenderHint(QPainter.Antialiasing)
         p.setRenderHint(QPainter.SmoothPixmapTransform)
         p.fillRect(self.rect(), QColor(26, 26, 26))
-        if self._orig_px and not self._orig_px.isNull():
+        if self._view_mode == "3d":
+            self._drawCubePlaceholder(p)
+        elif self._orig_px and not self._orig_px.isNull():
             dw, dh = self._drawSize()
             x = int((self.width()  - dw) / 2 + self._pan_x)
             y = int((self.height() - dh) / 2 + self._pan_y)
             scaled = self._orig_px.scaled(dw, dh, Qt.IgnoreAspectRatio,
                                           Qt.SmoothTransformation)
             p.drawPixmap(x, y, scaled)
+
+    def _drawCubePlaceholder(self, p):
+        w, h = self.width(), self.height()
+        scale = min(w, h) / 320.0
+        s = max(36, int(42 * scale))
+        off = max(16, int(18 * scale))
+        cx = w // 2
+        cy = h // 2 - off
+        p.setPen(QPen(QColor(255, 255, 255, 45), max(1, int(2 * scale))))
+        p.drawRect(cx - s, cy - s, s * 2, s * 2)
+        p.drawRect(cx - s + off, cy - s + off, s * 2, s * 2)
+        p.drawLine(cx - s, cy - s, cx - s + off, cy - s + off)
+        p.drawLine(cx + s, cy - s, cx + s + off, cy - s + off)
+        p.drawLine(cx - s, cy + s, cx - s + off, cy + s + off)
+        p.drawLine(cx + s, cy + s, cx + s + off, cy + s + off)
+        font = p.font()
+        font.setPixelSize(max(28, int(30 * scale)))
+        p.setFont(font)
+        p.setPen(QColor(255, 255, 255, 58))
+        p.drawText(QRectF(0, cy + s + off + 18, w, 48), Qt.AlignCenter, "3D Preview")
 
     # ── Input ──────────────────────────────────────────────────────────────
 
@@ -753,6 +1030,8 @@ class FullscreenPreviewDialog(QDialog):
 
 
 class _MetadataSection(QWidget):
+    tagClicked = Signal(str)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setStyleSheet("background: transparent;")
@@ -763,15 +1042,6 @@ class _MetadataSection(QWidget):
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(0)
 
-        # Separator
-        sep = QFrame()
-        sep.setFrameShape(QFrame.HLine)
-        sep.setFixedHeight(1)
-        sep.setStyleSheet("background-color: %s; border: none;" % BORDER_LIGHT)
-        self._layout.addWidget(sep)
-        self._layout.addSpacing(10)
-
-        # Container for rows
         self._rows = QVBoxLayout()
         self._rows.setSpacing(8)
         self._layout.addLayout(self._rows)
@@ -790,43 +1060,35 @@ class _MetadataSection(QWidget):
 
         d = asset_data
 
-        # Name
-        name = d.get("name", "")
-        if name:
-            self._rows.addWidget(self._title(name))
-
-        # Category . Subcategory
-        cat = d.get("category", "")
-        sub = d.get("subcategory", "")
-        cat_text = cat + (" / " + sub if sub else "")
-        if cat_text:
-            self._rows.addWidget(self._kv("Category", cat_text))
-
-        # Version
-        ver = d.get("version", "")
-        if ver:
-            self._rows.addWidget(self._kv("Version", ver))
+        # Tags — always first, no label
+        tags = d.get("tags", [])
+        if isinstance(tags, str):
+            tags = [t.strip() for t in tags.split(",") if t.strip()]
+        elif tags is None:
+            tags = []
+        if tags:
+            self._rows.addWidget(self._pills_only(tags))
 
         # File type
-        ft = d.get("filetype", "")
+        ft = _text(d.get("filetype"))
         if ft:
             self._rows.addWidget(self._kv("File type", ft))
 
         # Renderer
-        renderer = d.get("renderer", "Any")
+        renderer = _text(d.get("renderer"), "Any") or "Any"
         self._rows.addWidget(self._kv("Renderer", renderer))
 
         # DCC
-        dcc = d.get("dcc", "Universal")
+        dcc = _text(d.get("dcc"), "Universal") or "Universal"
         self._rows.addWidget(self._kv("DCC", dcc))
 
         # Author
-        author = d.get("author", "")
+        author = _text(d.get("author"))
         if author:
             self._rows.addWidget(self._kv("Author", author))
 
         # Project
-        project = d.get("project", "")
+        project = _text(d.get("project"))
         if project:
             self._rows.addWidget(self._kv("Project", project))
 
@@ -841,21 +1103,11 @@ class _MetadataSection(QWidget):
         if includes:
             self._rows.addWidget(self._pills("Includes", includes))
 
-        # Tags
-        tags = d.get("tags", [])
-        if tags:
-            self._rows.addWidget(self._pills("Tags", tags))
-
-        # File path
-        filepath = d.get("filepath", "")
-        if filepath:
-            self._rows.addWidget(self._path("Path", filepath))
-
         # Dates
-        created = d.get("created_at", "")
+        created = _text(d.get("created_at"))
         if created:
             self._rows.addWidget(self._kv("Created", created[:10]))
-        updated = d.get("updated_at", "")
+        updated = _text(d.get("updated_at"))
         if updated:
             self._rows.addWidget(self._kv("Updated", updated[:10]))
 
@@ -889,6 +1141,19 @@ class _MetadataSection(QWidget):
         layout.addWidget(v, 1)
         return row
 
+    def _pills_only(self, items):
+        row = QWidget()
+        row.setStyleSheet("background: transparent;")
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+        for item in items:
+            pill = _ClickablePill(_text(item))
+            pill.clicked.connect(lambda t=_text(item): self.tagClicked.emit(t))
+            layout.addWidget(pill)
+        layout.addStretch()
+        return row
+
     def _pills(self, label, items):
         row = QWidget()
         row.setStyleSheet("background: transparent;")
@@ -906,7 +1171,7 @@ class _MetadataSection(QWidget):
         pills_row = QHBoxLayout()
         pills_row.setSpacing(4)
         for item in items:
-            pill = QLabel(item)
+            pill = QLabel(_text(item))
             pill.setStyleSheet(
                 "background: %s; color: %s; border: 1px solid %s;"
                 " border-radius: 10px; padding: 2px 8px; font-size: 10px;"
@@ -950,49 +1215,8 @@ class _MetadataSection(QWidget):
                 self._clearLayout(item.layout())
 
 
-class _ViewportPlaceholder(QWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setFixedHeight(160)
-        self.setCursor(Qt.PointingHandCursor)
-        self.setToolTip("3D preview coming in a future update")
-
-    def paintEvent(self, _e):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
-
-        r = QRectF(self.rect()).adjusted(1, 1, -1, -1)
-        path = QPainterPath()
-        path.addRoundedRect(r, 8, 8)
-        p.setPen(QPen(QColor(255, 255, 255, 15), 1))
-        p.setBrush(QColor(BG_TERTIARY))
-        p.drawPath(path)
-
-        # Cube icon (simple wireframe cube)
-        cx, cy = self.width() // 2, self.height() // 2 - 10
-        s = 18
-        # Front face
-        p.setPen(QPen(QColor(255, 255, 255, 40), 1))
-        p.drawRect(cx - s, cy - s, s * 2, s * 2)
-        # Back face offset
-        off = 8
-        p.drawRect(cx - s + off, cy - s + off, s * 2, s * 2)
-        # Connecting lines
-        p.drawLine(cx - s, cy - s, cx - s + off, cy - s + off)
-        p.drawLine(cx + s, cy - s, cx + s + off, cy - s + off)
-        p.drawLine(cx - s, cy + s, cx - s + off, cy + s + off)
-        p.drawLine(cx + s, cy + s, cx + s + off, cy + s + off)
-
-        # Label
-        font = p.font()
-        font.setPixelSize(11)
-        p.setFont(font)
-        p.setPen(QColor(255, 255, 255, 50))
-        p.drawText(QRectF(0, cy + s + 14, self.width(), 20), Qt.AlignCenter, "3D Preview")
-
-
-class _ExpandBtn(QWidget):
-    """4-corner expand icon, semi-transparent dark pill — matches overlay style."""
+class _InspCloseBtn(QWidget):
+    """Small close button for the inspector preview — same style as fullscreen close."""
     clicked = Signal()
 
     def __init__(self, parent=None):
@@ -1000,28 +1224,75 @@ class _ExpandBtn(QWidget):
         self.setFixedSize(28, 28)
         self.setCursor(Qt.PointingHandCursor)
         self._hover = False
-        self.setAttribute(Qt.WA_NoSystemBackground)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(160, 30, 30, 200) if self._hover else QColor(0, 0, 0, 110))
+        p.drawEllipse(QRectF(self.rect()).adjusted(1, 1, -1, -1))
+        p.setPen(QColor(255, 255, 255, 220 if self._hover else 170))
+        font = p.font()
+        font.setPixelSize(12)
+        p.setFont(font)
+        p.drawText(QRectF(self.rect()), Qt.AlignCenter, "✕")
+
+    def enterEvent(self, e):
+        self._hover = True
+        self.update()
+
+    def leaveEvent(self, e):
+        self._hover = False
+        self.update()
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            self.clicked.emit()
+        e.accept()
+
+
+class _ExpandBtn(QWidget):
+    """4-corner expand icon, matching the other preview overlay controls."""
+    clicked = Signal()
+    _SCALE = 1.0
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(int(28 * self._SCALE), int(28 * self._SCALE))
+        self.setCursor(Qt.PointingHandCursor)
+        self._hover = False
+        self.setAttribute(Qt.WA_TranslucentBackground)
 
     def paintEvent(self, _e):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
 
-        # Background pill
         p.setPen(Qt.NoPen)
         p.setBrush(QColor(0, 0, 0, 140 if self._hover else 90))
-        p.drawRoundedRect(QRectF(self.rect()), 5, 5)
+        radius = 5 * self._SCALE
+        p.drawRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), radius, radius)
 
-        # 4-corner arrows
-        pen = QPen(QColor(255, 255, 255, 200 if self._hover else 140), 1.5,
-                   Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+        pen = QPen(QColor(205, 211, 219), int(2 * self._SCALE),
+                   Qt.SolidLine, Qt.SquareCap, Qt.MiterJoin)
         p.setPen(pen)
-        a = 5   # arm length
-        g = 7   # distance from centre to corner
-        cx, cy = 14, 14
-        for dx, dy in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
-            ox, oy = cx + dx * g, cy + dy * g
-            p.drawLine(int(ox), int(oy), int(ox - dx * a), int(oy))
-            p.drawLine(int(ox), int(oy), int(ox), int(oy - dy * a))
+        p.setBrush(Qt.NoBrush)
+
+        icon_size = int(14 * self._SCALE)
+        arm = int(5 * self._SCALE)
+        left = int((self.width() - icon_size) / 2)
+        top = int((self.height() - icon_size) / 2)
+        right = left + icon_size
+        bottom = top + icon_size
+
+        p.drawLine(left, top + arm, left, top)
+        p.drawLine(left, top, left + arm, top)
+        p.drawLine(right - arm, top, right, top)
+        p.drawLine(right, top, right, top + arm)
+        p.drawLine(right, bottom - arm, right, bottom)
+        p.drawLine(right, bottom, right - arm, bottom)
+        p.drawLine(left + arm, bottom, left, bottom)
+        p.drawLine(left, bottom, left, bottom - arm)
 
     def enterEvent(self, e):
         self._hover = True
@@ -1037,6 +1308,40 @@ class _ExpandBtn(QWidget):
         super().mousePressEvent(e)
 
 
+class _ClickablePill(QLabel):
+    clicked = Signal()
+
+    def __init__(self, text, parent=None):
+        super().__init__(text, parent)
+        self.setCursor(Qt.PointingHandCursor)
+        self._hover = False
+        self.setStyleSheet(
+            "background: %s; color: %s; border: 1px solid %s;"
+            " border-radius: 10px; padding: 2px 8px; font-size: 10px;"
+            % (ACCENT_BG, ACCENT_TEXT, ACCENT_BORDER)
+        )
+
+    def enterEvent(self, e):
+        self._hover = True
+        self.setStyleSheet(
+            "background: %s; color: %s; border: 1px solid %s;"
+            " border-radius: 10px; padding: 2px 8px; font-size: 10px;"
+            % (ACCENT_BORDER, ACCENT_TEXT, ACCENT)
+        )
+
+    def leaveEvent(self, e):
+        self._hover = False
+        self.setStyleSheet(
+            "background: %s; color: %s; border: 1px solid %s;"
+            " border-radius: 10px; padding: 2px 8px; font-size: 10px;"
+            % (ACCENT_BG, ACCENT_TEXT, ACCENT_BORDER)
+        )
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            self.clicked.emit()
+
+
 class _FsCloseBtn(QWidget):
     """Fullscreen close button — circle with ✕, same dark opacity as the counter."""
     clicked = Signal()
@@ -1046,7 +1351,7 @@ class _FsCloseBtn(QWidget):
         self.setFixedSize(52, 52)
         self.setCursor(Qt.PointingHandCursor)
         self._hover = False
-        self.setAttribute(Qt.WA_NoSystemBackground)
+        self.setAttribute(Qt.WA_TranslucentBackground)
 
     def paintEvent(self, _e):
         p = QPainter(self)
