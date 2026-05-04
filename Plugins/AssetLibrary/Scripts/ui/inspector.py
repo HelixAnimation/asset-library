@@ -43,6 +43,16 @@ def _asset_palette_index(asset_data):
         return 0
 
 
+class _VersionCombo(QComboBox):
+    """QComboBox that widens its popup by 1px so the right border is not clipped on Windows."""
+    def showPopup(self):
+        super().showPopup()
+        popup = self.view().window()
+        if popup is not self:
+            geo = popup.geometry()
+            popup.setGeometry(geo.adjusted(0, 0, 1, 0))
+
+
 class InspectorPanel(QWidget):
     closeRequested = Signal()
     tagClicked = Signal(str)
@@ -88,7 +98,7 @@ class InspectorPanel(QWidget):
         )
         title_row.addWidget(self.name_label, 1)
 
-        self.version_combo = QComboBox()
+        self.version_combo = _VersionCombo()
         self.version_combo.setFixedWidth(70)
         self.version_combo.view().setFocusPolicy(Qt.NoFocus)
         self.version_combo.view().setItemDelegate(_NoFocusDelegate(self.version_combo))
@@ -101,17 +111,14 @@ class InspectorPanel(QWidget):
             "QComboBox::down-arrow { image: none; border-left: 3px solid transparent;"
             " border-right: 3px solid transparent; border-top: 4px solid %s;"
             " width: 0; height: 0; }"
-            "QComboBox QAbstractItemView { background: %s;"
-            " border-top: 1px solid %s; border-left: 1px solid %s;"
-            " border-bottom: 1px solid %s; border-right: 1px solid %s;"
+            "QComboBox QAbstractItemView { background: %s; border: 1px solid %s;"
             " color: %s; selection-background-color: %s; selection-color: %s;"
             " padding: 2px; outline: none; }"
             "QComboBox QAbstractItemView::item { padding: 3px 6px; }"
             "QComboBox QAbstractItemView::item:selected { background: %s; }"
             % (BG_PRIMARY, BORDER_LIGHT, TEXT_SECONDARY,
                BORDER_MID, TEXT_TERTIARY,
-               BG_PRIMARY, BORDER_MID, BORDER_MID, BORDER_MID, BORDER_MID,
-               TEXT_PRIMARY, ACCENT_BG, ACCENT_TEXT,
+               BG_PRIMARY, BORDER_MID, TEXT_PRIMARY, ACCENT_BG, ACCENT_TEXT,
                ACCENT_BG)
         )
         self.version_combo.hide()
