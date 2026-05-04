@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+*.pyo
+
+# Session and agent files
+*.txt
+AGENTS.md
+HANDOFF_SUMMARY.md
