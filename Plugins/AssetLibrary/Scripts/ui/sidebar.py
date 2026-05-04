@@ -73,7 +73,7 @@ class SidebarWidget(QWidget):
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setFixedWidth(200)
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
-        self.setStyleSheet("#sidebar { background: %s; border-right: 1px solid %s; }" % (BG_SIDEBAR, BORDER_LIGHT))
+        self.setStyleSheet("#sidebar { background: %s; }" % BG_SIDEBAR)
 
         self._items        = []    # list of _SidebarItem
         self._active       = None
