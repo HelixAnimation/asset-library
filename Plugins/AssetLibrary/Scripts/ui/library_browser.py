@@ -1,4 +1,5 @@
 import os
+import math
 import logging
 
 from qtpy.QtWidgets import (
@@ -652,7 +653,8 @@ class _FlowWidget(QWidget):
             return
 
         avail    = max(1, self.width() - 2 * self._PADDING)
-        fit_cols = max(1, (avail + self._GAP) // (self._card_width + self._GAP))
+        # ceil: snap to a new column the moment cards would exceed _card_width
+        fit_cols = max(1, math.ceil((avail + self._GAP) / (self._card_width + self._GAP)))
 
         if len(self._cards) < fit_cols:
             # Partial row — don't stretch, just place at set width
