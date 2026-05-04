@@ -2,8 +2,8 @@ from qtpy.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea,
     QFrame, QSizePolicy,
 )
-from qtpy.QtCore import Qt, Signal
-from qtpy.QtGui import QFont
+from qtpy.QtCore import Qt, Signal, QVariantAnimation, QEasingCurve
+from qtpy.QtGui import QFont, QColor
 
 from ui.styles import (
     BG_SECONDARY, BG_PRIMARY, BG_SIDEBAR,
@@ -266,6 +266,12 @@ class _SidebarItem(QWidget):
         layout.addWidget(self.count_label)
 
         self.setFixedHeight(28 if not self._is_child else 24)
+
+        self._hover_anim = QVariantAnimation(self)
+        self._hover_anim.setDuration(100)
+        self._hover_anim.setEasingCurve(QEasingCurve.OutCubic)
+        self._hover_anim.valueChanged.connect(self._onHoverColor)
+
         self._updateStyle()
 
     def setExpandable(self, expandable):
@@ -282,6 +288,7 @@ class _SidebarItem(QWidget):
 
     def setActive(self, active):
         self._active = active
+        self._hover_anim.stop()
         self._updateStyle()
 
     def _catBg(self):
@@ -312,19 +319,29 @@ class _SidebarItem(QWidget):
                 "color: %s; font-size: 10px; background: transparent;" % TEXT_TERTIARY
             )
 
+    def _onHoverColor(self, color):
+        if not self._active:
+            font_size = "11px" if self._is_child else "12px"
+            self.label.setStyleSheet(
+                "color: %s; font-size: %s; background: transparent;" % (color.name(), font_size)
+            )
+
+    def _animateTo(self, target_hex):
+        self._hover_anim.stop()
+        current = self._hover_anim.currentValue()
+        start = current if isinstance(current, QColor) else QColor(TEXT_SECONDARY)
+        self._hover_anim.setStartValue(start)
+        self._hover_anim.setEndValue(QColor(target_hex))
+        self._hover_anim.start()
+
     def mousePressEvent(self, e):
         if e.button() == Qt.LeftButton:
             self.clicked.emit(self)
 
     def enterEvent(self, e):
         if not self._active:
-            self.setStyleSheet(
-                "#sidebarItem { background-color: %s; border-left: 2px solid transparent; }" % BG_PRIMARY
-            )
-            self.label.setStyleSheet(
-                "color: %s; font-size: 12px; background: transparent;" % TEXT_PRIMARY
-            )
+            self._animateTo(TEXT_PRIMARY)
 
     def leaveEvent(self, e):
         if not self._active:
-            self._updateStyle()
+            self._animateTo(TEXT_SECONDARY)
