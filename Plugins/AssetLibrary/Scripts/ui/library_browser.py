@@ -6,10 +6,10 @@ from qtpy.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QLineEdit, QComboBox, QScrollArea,
     QFrame, QSizePolicy, QApplication, QCheckBox,
-    QGridLayout,
+    QGridLayout, QGraphicsDropShadowEffect,
 )
 from qtpy.QtCore import Qt, QTimer, Signal, QSize, QEvent
-from qtpy.QtGui import QFont, QIcon
+from qtpy.QtGui import QFont, QIcon, QColor
 
 from ui.styles import (
     BG_PRIMARY, BG_SECONDARY, BG_TERTIARY,
@@ -117,6 +117,13 @@ class LibraryBrowser(QMainWindow):
         self.inspector.closeRequested.connect(self._hideInspector)
         self.inspector.tagClicked.connect(self._onTagAdded)
         self.inspector.hide()
+
+        _shadow = QGraphicsDropShadowEffect(self.inspector)
+        _shadow.setBlurRadius(24)
+        _shadow.setOffset(-6, 0)
+        _shadow.setColor(QColor(0, 0, 0, 100))
+        self.inspector.setGraphicsEffect(_shadow)
+
         body_layout.addWidget(self.inspector)
 
         right_layout.addWidget(body, 1)
