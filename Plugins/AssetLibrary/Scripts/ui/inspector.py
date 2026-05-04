@@ -14,14 +14,8 @@ from ui.styles import (
     BG_PRIMARY, BG_SECONDARY, BG_TERTIARY,
     TEXT_PRIMARY, TEXT_SECONDARY, TEXT_TERTIARY,
     BORDER_LIGHT, BORDER_MID, ACCENT, ACCENT_BG, ACCENT_TEXT, ACCENT_BORDER,
-    THUMB_PALETTES, _NoFocusDelegate,
+    THUMB_PALETTES, _NoFocusDelegate, VIEWS as _VIEWS,
 )
-
-_VIEWS = [
-    ("material", "#5ba3e0"),
-    ("clay",     "#c8934a"),
-    ("wire",     "#5dc8a0"),
-]
 
 _PREVIEW_SIZE = 340
 
@@ -62,7 +56,8 @@ class _VersionCombo(QComboBox):
 
 class InspectorPanel(QWidget):
     closeRequested = Signal()
-    tagClicked = Signal(str)
+    tagClicked     = Signal(str)
+    versionChanged = Signal(str)   # emits the selected version string
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -131,6 +126,9 @@ class InspectorPanel(QWidget):
                BORDER_MID, TEXT_TERTIARY,
                BG_PRIMARY, TEXT_PRIMARY, ACCENT_BG, ACCENT_TEXT,
                ACCENT_BG)
+        )
+        self.version_combo.currentTextChanged.connect(
+            lambda v: self.versionChanged.emit(v) if v else None
         )
         self.version_combo.hide()
         title_row.addWidget(self.version_combo)

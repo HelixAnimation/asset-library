@@ -10,16 +10,10 @@ from qtpy.QtGui import QPixmap, QColor, QPainter, QPainterPath, QPen, QBitmap
 from ui.styles import (
     BG_PRIMARY, BG_SECONDARY, BG_TERTIARY, TEXT_PRIMARY, TEXT_TERTIARY,
     BORDER_LIGHT, BORDER_MID, ACCENT, ACCENT_BG, ACCENT_TEXT,
-    THUMB_PALETTES,
+    THUMB_PALETTES, VIEWS as _VIEWS,
 )
 
 DEFAULT_CARD_WIDTH = 118
-
-_VIEWS = [
-    ("material", "#5ba3e0"),
-    ("clay",     "#c8934a"),
-    ("wire",     "#5dc8a0"),
-]
 
 _CARD_RADIUS = 6
 
@@ -385,7 +379,7 @@ class AssetCard(QWidget):
         menu.addSeparator()
         menu.addAction("Open in Explorer").triggered.connect(self._onOpenInExplorer)
         menu.addSeparator()
-        fav_label = "Remove from Favourites" if self._is_fav else "Add to Favourites"
+        fav_label = "Remove from Favorites" if self._is_fav else "Add to Favorites"
         menu.addAction(fav_label).triggered.connect(self._onStarClicked)
         menu.addAction("Edit asset…").triggered.connect(self._onEditAsset)
 

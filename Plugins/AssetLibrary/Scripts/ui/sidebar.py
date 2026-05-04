@@ -15,7 +15,7 @@ from ui.styles import (
 # special: "favorites" | "recent" | "" (normal category)
 _TREE = [
     ("QUICK ACCESS", None, None, "_header"),
-    ("★  Favourites",  None,   None, "favorites"),
+    ("★  Favorites",   None,   None, "favorites"),
     ("◷  Recent",      None,   None, "recent"),
     (None, None, None, "_divider"),
 

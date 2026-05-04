@@ -34,6 +34,13 @@ GREEN_BORDER = "#0F6E56"
 
 GOLD = "#c8a000"
 
+# ── Render-view types (name, dot colour) — shared by asset cards and inspector
+VIEWS = [
+    ("material", "#5ba3e0"),
+    ("clay",     "#c8934a"),
+    ("wire",     "#5dc8a0"),
+]
+
 # ── Thumbnail placeholder palettes  [bg, letter_colour] ─────────────────────
 THUMB_PALETTES = [
     ("#3d2820", "#e8a090"),
