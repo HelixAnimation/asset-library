@@ -1,11 +1,11 @@
 import os
 
 from qtpy.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QPushButton,
+    QWidget, QVBoxLayout, QLabel,
     QMenu, QAction, QActionGroup, QSizePolicy,
 )
 from qtpy.QtCore import Qt, Signal, QRectF
-from qtpy.QtGui import QPixmap, QColor, QPainter, QPainterPath, QPen
+from qtpy.QtGui import QPixmap, QColor, QPainter, QPainterPath, QPen, QBitmap
 
 from ui.styles import (
     BG_PRIMARY, BG_SECONDARY, BG_TERTIARY, TEXT_PRIMARY, TEXT_TERTIARY,
@@ -22,6 +22,13 @@ _VIEWS = [
 ]
 
 _CARD_RADIUS = 6
+
+
+def _asset_palette_index(asset_data):
+    try:
+        return int(asset_data.get("id") or 0) % len(THUMB_PALETTES)
+    except (AttributeError, TypeError, ValueError):
+        return 0
 
 
 class AssetCard(QWidget):
@@ -45,12 +52,9 @@ class AssetCard(QWidget):
         self._current_idx  = 0
         self._selected     = False
         self._hover        = False
-        self._view_mode    = "2d"
         self._scanThumbs()
 
-        # Prevent Qt from pre-erasing the widget rect to the palette dark colour
-        # before our paintEvent runs — that's what caused the black corner artifact.
-        self.setAttribute(Qt.WA_NoSystemBackground)
+        self.setAttribute(Qt.WA_StyledBackground, False)
         self.setMouseTracking(True)
 
         self._build()
@@ -71,7 +75,11 @@ class AssetCard(QWidget):
         if os.path.isfile(tp):
             self._view_thumbs["material"] = [tp]
         elif os.path.isdir(tp):
-            for fname in sorted(os.listdir(tp)):
+            try:
+                names = sorted(os.listdir(tp))
+            except OSError:
+                return
+            for fname in names:
                 low = fname.lower()
                 if not low.endswith((".png", ".jpg", ".jpeg")):
                     continue
@@ -92,10 +100,8 @@ class AssetCard(QWidget):
         layout.addWidget(self.thumb)
 
         # ── Overlays (absolute children of the card, not thumb) ──────
-        # Parenting to self (AssetCard) avoids a Qt/Windows issue where
-        # WA_NoSystemBackground on _ThumbWidget causes its children to
-        # lose native-window embedding and appear as floating top-level
-        # windows at screen position (0, 0).
+        # Parenting to self keeps the controls independent from the clipped
+        # thumbnail painter and avoids native child-window quirks in Prism.
 
         # Star — top-left
         self.star_btn = _StarBtn(self)
@@ -130,19 +136,8 @@ class AssetCard(QWidget):
         )
         self.thumb_counter.hide()
 
-        # View mode toggle pill
-        self._mode_toggle = _ViewModeToggle(self, height=22)
-        self._mode_toggle.toggled.connect(self._onViewModeToggled)
-        self._mode_toggle.hide()
-
         # ── Info row ──────────────────────────────────────────────────
-        info = QWidget()
-        info.setAttribute(Qt.WA_NoSystemBackground)
-        info.setStyleSheet(
-            "QWidget { background: %(bg)s; border-top: 1px solid %(bl)s;"
-            " border-bottom-left-radius: 6px; border-bottom-right-radius: 6px; }"
-            % {"bg": BG_SECONDARY, "bl": BORDER_LIGHT}
-        )
+        info = _InfoWidget()
         info_layout = QVBoxLayout(info)
         info_layout.setContentsMargins(8, 5, 8, 6)
         info_layout.setSpacing(2)
@@ -174,6 +169,7 @@ class AssetCard(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         p.setPen(Qt.NoPen)
+        p.fillRect(self.rect(), QColor(BG_PRIMARY))
         fill = QPainterPath()
         fill.addRoundedRect(QRectF(self.rect()), _CARD_RADIUS, _CARD_RADIUS)
         p.fillPath(fill, QColor(BG_PRIMARY))
@@ -200,12 +196,10 @@ class AssetCard(QWidget):
             self._dots[view].move(dot_x + i * (dot_size + dot_gap), dot_y)
 
         self.thumb_counter.adjustSize()
-        self.thumb_counter.move(w - self.thumb_counter.width() - 5, 5)
+        self.thumb_counter.move(5, thumb_h - self.thumb_counter.height() - 5)
 
-        self._mode_toggle.move(6, thumb_h - 28)
-
-        for w_ in (self.star_btn, self.arrow_left, self.arrow_right, self.thumb_counter,
-                   self._mode_toggle):
+        overlays = [self.star_btn, self.arrow_left, self.arrow_right, self.thumb_counter]
+        for w_ in overlays:
             w_.raise_()
         for dot in self._dots.values():
             dot.raise_()
@@ -228,8 +222,6 @@ class AssetCard(QWidget):
             dot.raise_()
         self._refreshArrows()
         self._refreshCounter()
-        self._mode_toggle.show()
-        self._mode_toggle.raise_()
 
     def _onHoverLeave(self):
         if self.underMouse():
@@ -243,7 +235,6 @@ class AssetCard(QWidget):
         self.arrow_left.hide()
         self.arrow_right.hide()
         self.thumb_counter.hide()
-        self._mode_toggle.hide()
 
     def enterEvent(self, e):
         self._onHoverEnter()
@@ -300,14 +291,6 @@ class AssetCard(QWidget):
         self._border.setHover(selected or self._hover)
         self._border.update()
 
-    def _onViewModeToggled(self, mode):
-        self._view_mode = mode
-        self.thumb.setViewMode(mode)
-        if mode == "2d":
-            self._showThumb()
-        self._refreshArrows()
-        self._refreshCounter()
-
     # ── Thumbnail display ───────────────────────────────────────────────
 
     def _showThumb(self):
@@ -318,8 +301,6 @@ class AssetCard(QWidget):
             self.thumb.clearImage()
 
     def _refreshArrows(self):
-        if self._view_mode != "2d":
-            self.arrow_left.hide(); self.arrow_right.hide(); return
         n = len(self._view_thumbs.get(self._current_view, []))
         if n > 1:
             self.arrow_left.show()
@@ -331,14 +312,12 @@ class AssetCard(QWidget):
             self.arrow_right.hide()
 
     def _refreshCounter(self):
-        if self._view_mode == "3d":
-            self.thumb_counter.hide(); return
         images = self._view_thumbs.get(self._current_view, [])
         n = len(images)
         if n > 1:
             self.thumb_counter.setText("%d/%d" % (self._current_idx + 1, n))
             self.thumb_counter.adjustSize()
-            self.thumb_counter.move(self.width() - self.thumb_counter.width() - 5, 5)
+            self.thumb_counter.move(5, self.thumb.height() - self.thumb_counter.height() - 5)
             self.thumb_counter.show()
             self.thumb_counter.raise_()
         else:
@@ -355,11 +334,11 @@ class AssetCard(QWidget):
 
     def contextMenuEvent(self, e):
         ss = self._menuStylesheet()
-        menu = QMenu(self)
+        menu = _RoundedMenu(self)
         menu.setStyleSheet(ss)
 
         if self._versions:
-            ver_menu = QMenu("Version", menu)
+            ver_menu = _RoundedMenu("Version", menu)
             ver_menu.setStyleSheet(ss)
             grp = QActionGroup(ver_menu)
             grp.setExclusive(True)
@@ -379,7 +358,7 @@ class AssetCard(QWidget):
             menu.addMenu(ver_menu)
 
         if self._filetypes:
-            ft_menu = QMenu("File type", menu)
+            ft_menu = _RoundedMenu("File type", menu)
             ft_menu.setStyleSheet(ss)
             grp2 = QActionGroup(ft_menu)
             grp2.setExclusive(True)
@@ -481,6 +460,24 @@ class AssetCard(QWidget):
         }
 
 
+# ── Rounded context menu ─────────────────────────────────────────────────────
+
+class _RoundedMenu(QMenu):
+    """QMenu that applies a bitmap mask so OS-level corners are rounded on Windows."""
+    _RADIUS = 8
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        bmp = QBitmap(self.size())
+        bmp.fill(Qt.color0)
+        p = QPainter(bmp)
+        p.setPen(Qt.NoPen)
+        p.setBrush(Qt.color1)
+        p.drawRoundedRect(bmp.rect(), self._RADIUS, self._RADIUS)
+        p.end()
+        self.setMask(bmp)
+
+
 # ── Border overlay ─────────────────────────────────────────────────────────
 
 class _BorderOverlay(QWidget):
@@ -520,6 +517,23 @@ class _BorderOverlay(QWidget):
         p.drawPath(path)
 
 
+# ── Info strip ───────────────────────────────────────────────────────────────
+
+class _InfoWidget(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_OpaquePaintEvent)
+        self.setAttribute(Qt.WA_StyledBackground, False)
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setPen(Qt.NoPen)
+        p.fillRect(self.rect(), QColor(BG_SECONDARY))
+        p.setPen(QPen(QColor(255, 255, 255, 20), 1.0))
+        p.drawLine(0, 0, self.width(), 0)
+
+
 # ── Counter pill ────────────────────────────────────────────────────────────
 
 class _CounterLabel(QLabel):
@@ -537,57 +551,6 @@ class _CounterLabel(QLabel):
         p.drawRoundedRect(QRectF(self.rect()), 8, 8)
         p.end()
         super().paintEvent(e)
-
-
-# ── View mode toggle pill ────────────────────────────────────────────────────
-
-class _ViewModeToggle(QWidget):
-    """Single pill showing current mode ("2D"/"3D"). Click to toggle."""
-    toggled = Signal(str)   # emits "2d" or "3d"
-
-    def __init__(self, parent=None, mode="2d", height=22):
-        super().__init__(parent)
-        self._mode = mode
-        self._hover = False
-        self.setAttribute(Qt.WA_NoSystemBackground)
-        self.setCursor(Qt.PointingHandCursor)
-        pill_w = max(36, int(height * 1.8))
-        self.setFixedSize(pill_w, height)
-
-    def setMode(self, mode):
-        self._mode = mode
-        self.update()
-
-    def mode(self):
-        return self._mode
-
-    def paintEvent(self, _e):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
-        w, h = self.width(), self.height()
-        r = QRectF(0, 0, w, h)
-        p.setPen(Qt.NoPen)
-        p.setBrush(QColor(0, 0, 0, 90 if self._hover else 60))
-        p.drawRoundedRect(r, h / 2, h / 2)
-        font = p.font()
-        font.setPixelSize(max(8, int(h * 0.45)))
-        font.setWeight(60)
-        p.setFont(font)
-        p.setPen(QColor(255, 255, 255, 220))
-        p.drawText(r, Qt.AlignCenter, "2D" if self._mode == "2d" else "3D")
-
-    def enterEvent(self, e):
-        self._hover = True; self.update(); super().enterEvent(e)
-
-    def leaveEvent(self, e):
-        self._hover = False; self.update(); super().leaveEvent(e)
-
-    def mousePressEvent(self, e):
-        if e.button() == Qt.LeftButton:
-            self._mode = "3d" if self._mode == "2d" else "2d"
-            self.update()
-            self.toggled.emit(self._mode)
-        super().mousePressEvent(e)
 
 
 # ── Star button ─────────────────────────────────────────────────────────────
@@ -791,26 +754,17 @@ class _ArrowBtn(QWidget):
 # ── Thumbnail widget ────────────────────────────────────────────────────────
 
 class _ThumbWidget(QWidget):
-    """
-    Thumbnail area. WA_NoSystemBackground prevents Qt from pre-filling
-    the widget rect with a dark palette colour before paintEvent — that
-    was the black-corner artifact root cause.  paintEvent clips the image
-    (or placeholder) to the top-rounded path; the untouched corners then
-    show through to the card's own BG_PRIMARY fill.
-    """
-
-    _RADIUS = 6
-
     def __init__(self, asset_data, parent=None):
         super().__init__(parent)
         self.asset_data = asset_data
         self._orig_px   = None
         self._view_mode = "2d"
-        self.setAttribute(Qt.WA_NoSystemBackground)
+        self.setAttribute(Qt.WA_OpaquePaintEvent)
+        self.setAttribute(Qt.WA_StyledBackground, False)
 
     def setImage(self, path):
         px = QPixmap(path)
-        self._orig_px = px if not px.isNull() else None
+        self._orig_px = self._flattenPixmap(px) if not px.isNull() else None
         self.update()
 
     def clearImage(self):
@@ -820,6 +774,23 @@ class _ThumbWidget(QWidget):
     def setViewMode(self, mode):
         self._view_mode = mode
         self.update()
+
+    def _baseColor(self):
+        idx = _asset_palette_index(self.asset_data)
+        bg, _ = THUMB_PALETTES[idx]
+        return QColor(bg)
+
+    def _flattenPixmap(self, px):
+        # Some generated thumbnail PNGs have transparent/antialiased corners.
+        # Flatten before scaling so transparent edge pixels cannot resolve to
+        # black against Qt's native backing store.
+        flat = QPixmap(px.size())
+        flat.fill(self._baseColor())
+        painter = QPainter(flat)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform)
+        painter.drawPixmap(0, 0, px)
+        painter.end()
+        return flat
 
     def _drawCubePlaceholder(self, p):
         h = self.height()
@@ -837,7 +808,7 @@ class _ThumbWidget(QWidget):
         font.setPixelSize(max(9, int(h * 0.075)))
         p.setFont(font)
         p.setPen(QColor(255, 255, 255, 50))
-        p.drawText(QRectF(0, cy + s + off + 4, self.width(), 20), Qt.AlignCenter, "3D Preview")
+        p.drawText(QRectF(0, cy + s + off + 4, self.width(), 28), Qt.AlignCenter, "3D Preview")
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
@@ -849,21 +820,20 @@ class _ThumbWidget(QWidget):
         p.setRenderHint(QPainter.SmoothPixmapTransform)
         p.setPen(Qt.NoPen)
 
-        # Clip to top-rounded, bottom-square path
         r = QRectF(self.rect())
-        d = self._RADIUS * 2.0
+
+        # Clip to rounded-top rect: extend below widget so only top corners are rounded
         clip = QPainterPath()
-        clip.moveTo(r.left() + self._RADIUS, r.top())
-        clip.lineTo(r.right() - self._RADIUS, r.top())
-        clip.arcTo(r.right() - d, r.top(), d, d, 90, -90)
-        clip.lineTo(r.right(), r.bottom())
-        clip.lineTo(r.left(), r.bottom())
-        clip.arcTo(r.left(), r.top(), d, d, 180, -90)
-        clip.closeSubpath()
+        clip.addRoundedRect(
+            QRectF(r.x(), r.y(), r.width(), r.height() + _CARD_RADIUS),
+            _CARD_RADIUS, _CARD_RADIUS,
+        )
         p.setClipPath(clip)
 
+        p.fillRect(self.rect(), self._baseColor())
+
         if self._view_mode == "3d":
-            idx = self.asset_data.get("id", 0) % len(THUMB_PALETTES)
+            idx = _asset_palette_index(self.asset_data)
             bg, _ = THUMB_PALETTES[idx]
             p.fillRect(self.rect(), QColor(bg))
             self._drawCubePlaceholder(p)
@@ -877,12 +847,12 @@ class _ThumbWidget(QWidget):
             y = (self.height() - scaled.height()) // 2
             p.drawPixmap(x, y, scaled)
         else:
-            idx = self.asset_data.get("id", 0) % len(THUMB_PALETTES)
+            idx = _asset_palette_index(self.asset_data)
             bg, fg = THUMB_PALETTES[idx]
             p.fillRect(self.rect(), QColor(bg))
             font = p.font()
             font.setPixelSize(22)
             p.setFont(font)
             p.setPen(QColor(fg))
-            name = self.asset_data.get("name") or "?"
+            name = str(self.asset_data.get("name") or "?")
             p.drawText(r, Qt.AlignCenter, name[0].upper())

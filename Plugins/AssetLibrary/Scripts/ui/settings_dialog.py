@@ -3,7 +3,7 @@ import os
 from qtpy.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QWidget, QFrame, QScrollArea, QSizePolicy,
-    QFileDialog, QProgressBar,
+    QFileDialog, QProgressBar, QSpinBox,
 )
 from qtpy.QtCore import Qt, Signal, QThread
 
@@ -17,10 +17,12 @@ class SettingsDialog(QDialog):
     """Plugin settings window. Expandable — add new sections below Library."""
 
     saved = Signal()
+    cardWidthChanged = Signal(int)
 
-    def __init__(self, plugin=None, parent=None):
+    def __init__(self, plugin=None, parent=None, card_width=235):
         super().__init__(parent)
         self.plugin = plugin
+        self._card_width = card_width
         self.setWindowTitle("Asset Library — Settings")
         self.setFixedWidth(480)
         self.setMinimumHeight(200)
@@ -69,6 +71,7 @@ class SettingsDialog(QDialog):
         body_layout.setSpacing(20)
 
         body_layout.addWidget(self._buildLibrarySection())
+        body_layout.addWidget(self._buildDisplaySection())
 
         # ── Add future sections here ──────────────────────────────────
 
@@ -130,6 +133,36 @@ class SettingsDialog(QDialog):
 
         return section
 
+    def _buildDisplaySection(self):
+        section = _Section("DISPLAY")
+
+        section.addField("THUMBNAIL SIZE (px)")
+        size_row = QHBoxLayout()
+        size_row.setSpacing(6)
+        self.card_width_spin = QSpinBox()
+        self.card_width_spin.setRange(90, 425)
+        self.card_width_spin.setValue(self._card_width)
+        self.card_width_spin.setSuffix(" px")
+        self.card_width_spin.setStyleSheet(
+            "QSpinBox { background: %(bg2)s; border: 1px solid %(bl)s;"
+            " border-radius: 6px; padding: 4px 8px; color: %(tp)s; font-size: 12px; }"
+            "QSpinBox:focus { border-color: %(bm)s; }"
+            "QSpinBox::up-button, QSpinBox::down-button { width: 18px; }"
+            % {"bg2": BG_SECONDARY, "bl": BORDER_LIGHT, "bm": BORDER_MID, "tp": TEXT_PRIMARY}
+        )
+        size_row.addWidget(self.card_width_spin)
+        size_row.addStretch()
+        section.addLayout(size_row)
+
+        hint = QLabel("Width of each asset card in the grid (90 – 425 px, default 235).")
+        hint.setWordWrap(True)
+        hint.setStyleSheet(
+            "font-size: 10px; color: %s; background: transparent;" % TEXT_TERTIARY
+        )
+        section.addWidget(hint)
+
+        return section
+
     # ------------------------------------------------------------------
 
     def _populate(self):
@@ -188,6 +221,12 @@ class SettingsDialog(QDialog):
             )
             self.saved.emit()
 
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            self._onSave()
+        else:
+            super().keyPressEvent(event)
+
     def _onSave(self):
         path = self.path_edit.text().strip()
         if path and not os.path.isdir(path):
@@ -197,6 +236,7 @@ class SettingsDialog(QDialog):
             return
         if self.plugin and path:
             self.plugin.setLibraryRoot(path)
+        self.cardWidthChanged.emit(self.card_width_spin.value())
         self.saved.emit()
         self.accept()
 

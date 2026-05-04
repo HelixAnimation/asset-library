@@ -8,7 +8,7 @@ from qtpy.QtWidgets import (
     QFrame, QSizePolicy, QApplication, QCheckBox,
     QGridLayout, QGraphicsDropShadowEffect,
 )
-from qtpy.QtCore import Qt, QTimer, Signal, QSize, QEvent, QPropertyAnimation, QEasingCurve
+from qtpy.QtCore import Qt, QTimer, Signal, QSize, QEvent
 from qtpy.QtGui import QFont, QIcon, QColor
 
 from ui.styles import (
@@ -113,24 +113,18 @@ class LibraryBrowser(QMainWindow):
         body_layout.addWidget(self._buildContent(), 1)
 
         self.inspector = InspectorPanel()
+        self.inspector.setFixedWidth(340)
         self.inspector.closeRequested.connect(self._hideInspector)
         self.inspector.tagClicked.connect(self._onTagAdded)
+        self.inspector.hide()
 
-        # Wrap inspector so we animate the wrapper's width — the inspector stays
-        # at full 340px inside and gets clipped, avoiding any content reflow snaps.
-        self._inspector_wrap = _InspectorSlideWrapper(self.inspector)
-
-        _shadow = QGraphicsDropShadowEffect(self._inspector_wrap)
+        _shadow = QGraphicsDropShadowEffect(self.inspector)
         _shadow.setBlurRadius(24)
         _shadow.setOffset(-6, 0)
         _shadow.setColor(QColor(0, 0, 0, 60))
-        self._inspector_wrap.setGraphicsEffect(_shadow)
+        self.inspector.setGraphicsEffect(_shadow)
 
-        self._inspector_anim = QPropertyAnimation(self._inspector_wrap, b"maximumWidth")
-        self._inspector_anim.setDuration(250)
-        self._inspector_anim.setEasingCurve(QEasingCurve.OutCubic)
-
-        body_layout.addWidget(self._inspector_wrap)
+        body_layout.addWidget(self.inspector)
 
         right_layout.addWidget(body, 1)
 
@@ -515,11 +509,7 @@ class LibraryBrowser(QMainWindow):
             return
         try:
             self.inspector.setAsset(asset_data, versions)
-            self._inspector_anim.stop()
-            self._inspector_anim.setEasingCurve(QEasingCurve.OutCubic)
-            self._inspector_anim.setStartValue(self._inspector_wrap.maximumWidth())
-            self._inspector_anim.setEndValue(340)
-            self._inspector_anim.start()
+            self.inspector.show()
         except Exception:
             logger.exception(
                 "Failed to populate inspector for asset id=%r name=%r",
@@ -528,24 +518,13 @@ class LibraryBrowser(QMainWindow):
             )
 
     def _hideInspector(self):
+        self.inspector.hide()
         if self._selected_card:
             self._selected_card.setSelected(False)
             self._selected_card = None
-        self._inspector_anim.stop()
-        self._inspector_anim.setEasingCurve(QEasingCurve.InCubic)
-        self._inspector_anim.setStartValue(self._inspector_wrap.maximumWidth())
-        self._inspector_anim.setEndValue(0)
-        self._inspector_anim.finished.connect(self._onInspectorClosed)
-        self._inspector_anim.start()
-
-    def _onInspectorClosed(self):
-        try:
-            self._inspector_anim.finished.disconnect(self._onInspectorClosed)
-        except Exception:
-            pass
 
     def keyPressEvent(self, e):
-        if e.key() == Qt.Key_Escape and self._inspector_wrap.maximumWidth() > 0:
+        if e.key() == Qt.Key_Escape and self.inspector.isVisible():
             self._hideInspector()
         else:
             super().keyPressEvent(e)
@@ -636,23 +615,6 @@ class LibraryBrowser(QMainWindow):
 # ─────────────────────────────────────────────────────────────────────────────
 # Flow grid widget
 # ─────────────────────────────────────────────────────────────────────────────
-
-class _InspectorSlideWrapper(QWidget):
-    """Clips the inspector to the wrapper's animated width so content never reflows."""
-    _W = 340
-
-    def __init__(self, inspector, parent=None):
-        super().__init__(parent)
-        self._inspector = inspector
-        inspector.setParent(self)
-        inspector.setFixedWidth(self._W)
-        self.setMinimumWidth(0)
-        self.setMaximumWidth(0)
-
-    def resizeEvent(self, e):
-        super().resizeEvent(e)
-        self._inspector.setGeometry(0, 0, self._W, self.height())
-
 
 class _FlowWidget(QWidget):
     """Manually positions AssetCards in a responsive grid."""

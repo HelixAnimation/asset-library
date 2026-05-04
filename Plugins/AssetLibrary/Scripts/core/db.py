@@ -402,6 +402,57 @@ class AssetDB:
     # Category counts
     # ------------------------------------------------------------------
 
+    def batch_get_asset_tags(self, asset_ids):
+        if not asset_ids:
+            return {}
+        ph = ",".join("?" * len(asset_ids))
+        rows = self.conn.execute(
+            "SELECT at_.asset_id, t.name FROM asset_tags at_ "
+            "JOIN tags t ON t.id = at_.tag_id "
+            "WHERE at_.asset_id IN (%s) ORDER BY t.name" % ph,
+            asset_ids,
+        ).fetchall()
+        out = {aid: [] for aid in asset_ids}
+        for r in rows:
+            out[r[0]].append(r[1])
+        return out
+
+    def batch_get_favorites(self, asset_ids, username):
+        if not asset_ids:
+            return set()
+        ph = ",".join("?" * len(asset_ids))
+        rows = self.conn.execute(
+            "SELECT asset_id FROM favorites WHERE username = ? AND asset_id IN (%s)" % ph,
+            [username] + list(asset_ids),
+        ).fetchall()
+        return {r[0] for r in rows}
+
+    def batch_get_versions(self, asset_ids):
+        if not asset_ids:
+            return {}
+        ph = ",".join("?" * len(asset_ids))
+        rows = self.conn.execute(
+            "SELECT * FROM versions WHERE asset_id IN (%s) ORDER BY version DESC" % ph,
+            asset_ids,
+        ).fetchall()
+        out = {aid: [] for aid in asset_ids}
+        for r in rows:
+            out[r["asset_id"]].append(dict(r))
+        return out
+
+    def batch_get_filetypes(self, asset_ids):
+        if not asset_ids:
+            return {}
+        ph = ",".join("?" * len(asset_ids))
+        rows = self.conn.execute(
+            "SELECT asset_id, filetype FROM versions WHERE asset_id IN (%s) GROUP BY asset_id, filetype ORDER BY filetype" % ph,
+            asset_ids,
+        ).fetchall()
+        out = {aid: [] for aid in asset_ids}
+        for r in rows:
+            out[r[0]].append(r[1])
+        return out
+
     def get_category_counts(self, username=None):
         rows = self.conn.execute(
             "SELECT category, subcategory, COUNT(*) as cnt FROM assets GROUP BY category, subcategory"
