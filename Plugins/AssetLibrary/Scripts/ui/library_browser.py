@@ -3,8 +3,9 @@ import logging
 
 from qtpy.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QLineEdit, QComboBox, QSlider, QScrollArea,
-    QFrame, QSizePolicy, QApplication, QSplitter,
+    QPushButton, QLineEdit, QComboBox, QScrollArea,
+    QFrame, QSizePolicy, QApplication, QCheckBox,
+    QGridLayout,
 )
 from qtpy.QtCore import Qt, QTimer, Signal, QSize, QEvent
 from qtpy.QtGui import QFont, QIcon
@@ -12,8 +13,9 @@ from qtpy.QtGui import QFont, QIcon
 from ui.styles import (
     BG_PRIMARY, BG_SECONDARY, BG_TERTIARY,
     TEXT_PRIMARY, TEXT_SECONDARY, TEXT_TERTIARY,
-    BORDER_LIGHT, BORDER_MID, ACCENT, GREEN, GREEN_BG, GREEN_BORDER,
-    get_stylesheet,
+    BORDER_LIGHT, BORDER_MID, ACCENT, ACCENT_BG, ACCENT_BORDER, ACCENT_TEXT,
+    GREEN, GREEN_BG, GREEN_BORDER,
+    get_stylesheet, _NoFocusDelegate,
 )
 from ui.sidebar import SidebarWidget
 from ui.asset_card import AssetCard
@@ -42,9 +44,8 @@ class LibraryBrowser(QMainWindow):
         self._search     = ""
         self._sort       = "recent"
         self._card_width = _CARD_WIDTH_DEFAULT
-        self._dcc_filter = None
-        self._type_filter = None
-        self._ft_filter  = None
+        self._filter_state = {}
+        self._active_tags = []     # ordered list of active tag names
 
         # -- DB -----------------------------------------------------------
         self._db = None
@@ -54,7 +55,8 @@ class LibraryBrowser(QMainWindow):
         self._all_cards = []   # list of AssetCard (all loaded)
         self._visible_cards = []
         self._selected_card = None
-        self._pre_inspect_width = 960
+        self._pending_inspector_asset = None
+        self._pending_inspector_versions = []
 
         self._search_timer = QTimer()
         self._search_timer.setSingleShot(True)
@@ -66,7 +68,7 @@ class LibraryBrowser(QMainWindow):
 
         self.core.parentWindow(self)
         self.setWindowTitle("Asset Library")
-        self.resize(960, 660)
+        self.resize(1299, 731)
         self._centerOnScreen()
 
         QTimer.singleShot(0, self._loadFromDB)
@@ -81,100 +83,69 @@ class LibraryBrowser(QMainWindow):
         central.setStyleSheet("background: %s;" % BG_PRIMARY)
         self.setCentralWidget(central)
 
-        root = QVBoxLayout(central)
+        root = QHBoxLayout(central)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        root.addWidget(self._buildToolbar())
-
-        body = QSplitter(Qt.Horizontal)
-        body.setHandleWidth(1)
-        body.setChildrenCollapsible(True)
-
+        # Left: full-height sidebar
         self.sidebar = SidebarWidget()
         self.sidebar.itemSelected.connect(self._onSidebarSelect)
-        body.addWidget(self.sidebar)
+        root.addWidget(self.sidebar)
 
-        body.addWidget(self._buildContent())
+        # Right: toolbar + filters + content + status
+        right = QWidget()
+        right.setAttribute(Qt.WA_StyledBackground, True)
+        right.setStyleSheet("background: %s;" % BG_SECONDARY)
+        right_layout = QVBoxLayout(right)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(0)
+
+        right_layout.addWidget(self._buildToolbar())
+        right_layout.addWidget(self._buildFilterBar())
+
+        body = QWidget()
+        body.setAttribute(Qt.WA_StyledBackground, True)
+        body.setStyleSheet("background: %s;" % BG_PRIMARY)
+        body_layout = QHBoxLayout(body)
+        body_layout.setContentsMargins(0, 0, 0, 0)
+        body_layout.setSpacing(0)
+        body_layout.addWidget(self._buildContent(), 1)
 
         self.inspector = InspectorPanel()
+        self.inspector.setFixedWidth(340)
         self.inspector.closeRequested.connect(self._hideInspector)
+        self.inspector.tagClicked.connect(self._onTagAdded)
         self.inspector.hide()
-        body.addWidget(self.inspector)
+        body_layout.addWidget(self.inspector)
 
-        body.setSizes([185, 600, 340])
-        body.setStretchFactor(0, 0)
-        body.setStretchFactor(1, 1)
-        body.setStretchFactor(2, 0)
-        root.addWidget(body, 1)
+        right_layout.addWidget(body, 1)
 
-        root.addWidget(self._buildStatusBar())
+        right_layout.addWidget(self._buildStatusBar())
+        root.addWidget(right, 1)
 
     def _buildToolbar(self):
         bar = QWidget()
         bar.setObjectName("toolbar")
-        bar.setFixedHeight(46)
+        bar.setFixedHeight(58)
         layout = QHBoxLayout(bar)
-        layout.setContentsMargins(14, 0, 14, 0)
+        layout.setContentsMargins(14, 14, 14, 14)
         layout.setSpacing(8)
 
-        title = QLabel("Asset Library")
-        title.setStyleSheet(
-            "font-size: 13px; font-weight: 500; color: %s; margin-right: 4px;"
-            " background: transparent; white-space: nowrap;" % TEXT_PRIMARY
-        )
-        layout.addWidget(title)
-
-        # Search
-        search_wrap = QWidget()
-        search_wrap.setStyleSheet("background: transparent;")
-        sw_layout = QHBoxLayout(search_wrap)
-        sw_layout.setContentsMargins(0, 0, 0, 0)
-        sw_layout.setSpacing(0)
-        self.search_icon = QLabel("🔍")
-        self.search_icon.setStyleSheet(
-            "font-size: 10px; color: %s; background: transparent; margin-left: 8px;" % TEXT_TERTIARY
-        )
-        self.search_input = QLineEdit()
-        self.search_input.setObjectName("searchInput")
-        self.search_input.setPlaceholderText("Search assets…")
-        self.search_input.textChanged.connect(self._onSearchChanged)
-        sw_layout.addWidget(self.search_input, 1)
-        layout.addWidget(self.search_input, 1)
+        # Search + tag input
+        self.tag_input = _TagInput()
+        self.tag_input.searchChanged.connect(self._onSearchChanged)
+        self.tag_input.tagAdded.connect(self._onTagAdded)
+        self.tag_input.tagRemoved.connect(self._onTagRemoved)
+        layout.addWidget(self.tag_input, 1)
 
         # Sort
         self.sort_combo = QComboBox()
         self.sort_combo.setFixedWidth(130)
+        self.sort_combo.view().setFocusPolicy(Qt.NoFocus)
+        self.sort_combo.view().setItemDelegate(_NoFocusDelegate(self.sort_combo))
         self.sort_combo.addItems(_SORT_OPTIONS)
         self.sort_combo.currentIndexChanged.connect(self._onSortChanged)
         layout.addWidget(self.sort_combo)
-
-        # Size slider
-        slider_wrap = QWidget()
-        slider_wrap.setStyleSheet("background: transparent;")
-        sl_layout = QHBoxLayout(slider_wrap)
-        sl_layout.setContentsMargins(0, 0, 0, 0)
-        sl_layout.setSpacing(4)
-        sm = QLabel("⬛")
-        sm.setStyleSheet("font-size: 8px; color: %s; background: transparent;" % TEXT_TERTIARY)
-        self.size_slider = QSlider(Qt.Horizontal)
-        self.size_slider.setFixedWidth(80)
-        self.size_slider.setRange(_CARD_WIDTH_MIN, _CARD_WIDTH_MAX)
-        self.size_slider.setValue(_CARD_WIDTH_DEFAULT)
-        self.size_slider.valueChanged.connect(self._onSliderChanged)
-        lg = QLabel("⬛")
-        lg.setStyleSheet("font-size: 13px; color: %s; background: transparent;" % TEXT_TERTIARY)
-        sl_layout.addWidget(sm)
-        sl_layout.addWidget(self.size_slider)
-        sl_layout.addWidget(lg)
-        layout.addWidget(slider_wrap)
-
-        # Filters button
-        self.filters_btn = QPushButton("Filters")
-        self.filters_btn.setObjectName("filtersBtn")
-        self.filters_btn.setCheckable(True)
-        self.filters_btn.toggled.connect(self._onFiltersToggled)
-        layout.addWidget(self.filters_btn)
 
         # Settings button
         settings_btn = QPushButton("⚙")
@@ -192,18 +163,18 @@ class LibraryBrowser(QMainWindow):
 
         return bar
 
+    def _buildFilterBar(self):
+        self.filter_bar = _FilterBar()
+        self.filter_bar.filtersChanged.connect(self._onFilterPanelChanged)
+        return self.filter_bar
+
     def _buildContent(self):
         content = QWidget()
+        content.setAttribute(Qt.WA_StyledBackground, True)
         content.setStyleSheet("background: %s;" % BG_PRIMARY)
         layout = QVBoxLayout(content)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-
-        # Filters panel (hidden by default)
-        self.filters_panel = _FiltersPanel()
-        self.filters_panel.setVisible(False)
-        self.filters_panel.filtersChanged.connect(self._onFilterPanelChanged)
-        layout.addWidget(self.filters_panel)
 
         # Grid scroll area
         self.grid_scroll = QScrollArea()
@@ -248,6 +219,7 @@ class LibraryBrowser(QMainWindow):
 
     def _buildStatusBar(self):
         bar = QWidget()
+        bar.setAttribute(Qt.WA_StyledBackground, True)
         bar.setObjectName("statusBar")
         bar.setFixedHeight(28)
         layout = QHBoxLayout(bar)
@@ -283,6 +255,7 @@ class LibraryBrowser(QMainWindow):
         try:
             counts = db.get_category_counts(username=self._username)
             self.sidebar.setCounts(counts)
+            self.tag_input.setTags(db.get_all_tags())
             self._loadCards(db)
         finally:
             db.close()
@@ -292,17 +265,32 @@ class LibraryBrowser(QMainWindow):
         lib_root = self.plugin._getAssetLibRoot() if self.plugin else ""
         self._all_cards = []
 
+        ids = [a["id"] for a in assets]
+        tags_map = db.batch_get_asset_tags(ids)
+        fav_ids  = db.batch_get_favorites(ids, self._username)
+        vers_map = db.batch_get_versions(ids)
+        ft_map   = db.batch_get_filetypes(ids)
+
         for a in assets:
             a["_lib_root"] = lib_root
-            is_fav    = db.is_favorite(a["id"], self._username)
-            versions  = db.get_versions(a["id"])
-            filetypes = db.get_filetypes_for_asset(a["id"])
-            card = AssetCard(a, is_fav, versions, filetypes)
+            a["tags"] = tags_map.get(a["id"], [])
+            card = AssetCard(
+                a,
+                a["id"] in fav_ids,
+                vers_map.get(a["id"], []),
+                ft_map.get(a["id"], []),
+            )
             card.starToggled.connect(self._onStarToggled)
             card.assetImport.connect(self._onAssetImport)
             card.assetClicked.connect(self._onCardClicked)
             self._all_cards.append(card)
 
+        names = [c.asset_data.get("name", "") for c in self._all_cards]
+        self.tag_input.setAssets(names)
+        authors = sorted({c.asset_data.get("author", "") for c in self._all_cards if c.asset_data.get("author", "")})
+        self.filter_bar.setAuthors(authors)
+        projects = sorted({c.asset_data.get("project", "") for c in self._all_cards if c.asset_data.get("project", "")})
+        self.filter_bar.setProjects(projects)
         self._applyFilters()
 
     def refreshAssets(self):
@@ -338,15 +326,51 @@ class LibraryBrowser(QMainWindow):
             filtered = [c for c in filtered
                         if q in c.asset_data.get("name", "").lower()]
 
-        # DCC filter
-        if self._dcc_filter and self._dcc_filter != "All":
+        # Toolbar filters
+        fs = self._filter_state or {}
+        dcc_values = fs.get("dcc") or set()
+        if dcc_values:
             filtered = [c for c in filtered
-                        if c.asset_data.get("dcc", "Universal") in (self._dcc_filter, "Universal")]
+                        if c.asset_data.get("dcc", "Universal") in dcc_values
+                        or c.asset_data.get("dcc", "Universal") == "Universal"]
 
-        # Type filter
-        if self._type_filter:
+        type_values = fs.get("type") or set()
+        if type_values:
             filtered = [c for c in filtered
-                        if c.asset_data.get("category") == self._type_filter]
+                        if c.asset_data.get("category") in type_values]
+
+        filetype_values = fs.get("filetype") or set()
+        if filetype_values:
+            filtered = [c for c in filtered
+                        if (c._selected_filetype or c.asset_data.get("filetype", "")) in filetype_values]
+
+        includes_values = fs.get("includes") or set()
+        if includes_values:
+            include_fields = {
+                "Rig": "has_rig",
+                "Textures": "has_textures",
+                "Materials": "has_materials",
+            }
+            filtered = [
+                c for c in filtered
+                if all(int(c.asset_data.get(include_fields[name], 0) or 0) for name in includes_values)
+            ]
+
+        author_values = fs.get("author") or set()
+        if author_values:
+            filtered = [c for c in filtered
+                        if c.asset_data.get("author", "") in author_values]
+
+        project_values = fs.get("project") or set()
+        if project_values:
+            filtered = [c for c in filtered
+                        if c.asset_data.get("project", "") in project_values]
+
+        # Tags (AND logic — card must have ALL active tags)
+        if self._active_tags:
+            active_set = set(self._active_tags)
+            filtered = [c for c in filtered
+                        if active_set.issubset(set(c.asset_data.get("tags", [])))]
 
         # Sort
         if self._sort == "name_asc":
@@ -363,6 +387,9 @@ class LibraryBrowser(QMainWindow):
         total = len(self._all_cards)
         if count == total:
             self.status_label.setText("%d assets" % count)
+        elif self._active_tags:
+            tag_str = " + ".join(self._active_tags)
+            self.status_label.setText("%d assets · filtered by %s" % (count, tag_str))
         else:
             self.status_label.setText("%d of %d assets" % (count, total))
 
@@ -392,21 +419,24 @@ class LibraryBrowser(QMainWindow):
         self._search = text.strip()
         self._search_timer.start()
 
+    def _onTagAdded(self, tag):
+        if tag not in self._active_tags:
+            self._active_tags.append(tag)
+        self.tag_input._addTag(tag)
+        self._applyFilters()
+
+    def _onTagRemoved(self, tag):
+        if tag in self._active_tags:
+            self._active_tags.remove(tag)
+        self._applyFilters()
+
     def _onSortChanged(self, idx):
         mapping = {0: "recent", 1: "name_asc", 2: "name_desc", 3: "category"}
         self._sort = mapping.get(idx, "recent")
         self._applyFilters()
 
-    def _onSliderChanged(self, value):
-        self._card_width = value
-        self.flow.setCardWidth(value)
-
-    def _onFiltersToggled(self, checked):
-        self.filters_panel.setVisible(checked)
-
-    def _onFilterPanelChanged(self, dcc, type_filter):
-        self._dcc_filter  = dcc
-        self._type_filter = type_filter
+    def _onFilterPanelChanged(self, state):
+        self._filter_state = state
         self._applyFilters()
 
     def _onStarToggled(self, asset_id, is_fav):
@@ -437,29 +467,53 @@ class LibraryBrowser(QMainWindow):
             self._applyFilters()
 
     def _onCardClicked(self, asset_data):
-        # Deselect previous
-        if self._selected_card:
-            self._selected_card.setSelected(False)
-        # Find and select new card
-        for c in self._visible_cards:
-            if c.asset_data.get("id") == asset_data.get("id"):
-                c.setSelected(True)
-                self._selected_card = c
-                break
-        # Populate and show inspector
-        self.inspector.setAsset(asset_data)
-        if self.inspector.isHidden():
-            self._pre_inspect_width = self.width()
+        try:
+            # Deselect previous
+            if self._selected_card:
+                self._selected_card.setSelected(False)
+            self._selected_card = None
+
+            # Find and select new card
+            for c in self._visible_cards:
+                if c.asset_data.get("id") == asset_data.get("id"):
+                    c.setSelected(True)
+                    self._selected_card = c
+                    break
+
+            # Opening a hidden splitter child and resizing the Prism-hosted
+            # window during mousePressEvent can crash some Qt hosts. Defer it.
+            self._pending_inspector_asset = dict(asset_data or {})
+            self._pending_inspector_versions = list(self._selected_card._versions) if self._selected_card else []
+            QTimer.singleShot(0, self._openPendingInspector)
+        except Exception:
+            logger.exception(
+                "Failed to open inspector for asset id=%r name=%r",
+                asset_data.get("id") if isinstance(asset_data, dict) else None,
+                asset_data.get("name") if isinstance(asset_data, dict) else None,
+            )
+
+    def _openPendingInspector(self):
+        asset_data = self._pending_inspector_asset
+        versions = self._pending_inspector_versions
+        self._pending_inspector_asset = None
+        self._pending_inspector_versions = []
+        if not asset_data:
+            return
+        try:
+            self.inspector.setAsset(asset_data, versions)
             self.inspector.show()
-            if self.width() < 1300:
-                self.resize(1300, self.height())
+        except Exception:
+            logger.exception(
+                "Failed to populate inspector for asset id=%r name=%r",
+                asset_data.get("id"),
+                asset_data.get("name"),
+            )
 
     def _hideInspector(self):
         self.inspector.hide()
         if self._selected_card:
             self._selected_card.setSelected(False)
             self._selected_card = None
-        self.resize(self._pre_inspect_width, self.height())
 
     def keyPressEvent(self, e):
         if e.key() == Qt.Key_Escape and self.inspector.isVisible():
@@ -468,9 +522,14 @@ class LibraryBrowser(QMainWindow):
             super().keyPressEvent(e)
 
     def _onSettingsClicked(self):
-        dlg = SettingsDialog(plugin=self.plugin, parent=self)
+        dlg = SettingsDialog(plugin=self.plugin, parent=self, card_width=self._card_width)
         dlg.saved.connect(self.refreshAssets)
+        dlg.cardWidthChanged.connect(self._onCardWidthChanged)
         dlg.exec_()
+
+    def _onCardWidthChanged(self, w):
+        self._card_width = w
+        self.flow.setCardWidth(w)
 
     def _onImportClicked(self):
         dlg = PublishDialog(parent=self)
@@ -592,14 +651,19 @@ class _FlowWidget(QWidget):
             self.setMinimumHeight(80)
             return
 
-        avail = max(1, self.width() - 2 * self._PADDING)
-        cols  = max(1, (avail + self._GAP) // (self._card_width + self._GAP))
+        avail    = max(1, self.width() - 2 * self._PADDING)
+        cols     = max(1, (avail + self._GAP) // (self._card_width + self._GAP))
+        actual_w = self._card_width
+
+        for i, card in enumerate(self._cards):
+            card.setCardWidth(actual_w)
+
         card_h = self._cards[0].height()
 
         for i, card in enumerate(self._cards):
             row = i // cols
             col = i % cols
-            x   = self._PADDING + col * (self._card_width + self._GAP)
+            x   = self._PADDING + col * (actual_w + self._GAP)
             y   = self._PADDING + row * (card_h + self._GAP)
             card.move(x, y)
 
@@ -609,61 +673,778 @@ class _FlowWidget(QWidget):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Filters panel (shown below toolbar when ⚙ Filters is toggled)
+# Tag input widget (search bar with inline tag pills + autocomplete)
 # ─────────────────────────────────────────────────────────────────────────────
 
-class _FiltersPanel(QWidget):
-    filtersChanged = Signal(str, str)   # (dcc, type_filter)
+class _TagInput(QWidget):
+    """Search bar with inline tag pills and autocomplete dropdown.
 
-    _DCC_OPTIONS  = ["All DCCs", "Houdini exclusive", "Maya exclusive"]
-    _TYPE_OPTIONS = ["All types", "Materials", "Models", "HDAs", "Textures", "Lighting"]
+    - Type to see tag + asset name suggestions from the dropdown
+    - Press Enter or click a tag suggestion to add a tag pill (filters grid)
+    - Click an asset name suggestion or press Enter with no tag match → text search
+    - Each pill has a × button to remove it; Backspace on empty removes last pill
+    """
+
+    searchChanged = Signal(str)   # emitted on explicit text search (Enter / name click), not per-keystroke
+    tagAdded = Signal(str)
+    tagRemoved = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setObjectName("filtersPanel")
-        self.setStyleSheet(
-            "#filtersPanel { background: %s; border-bottom: 1px solid %s; }" % (BG_SECONDARY, BORDER_LIGHT)
-        )
-        self.setFixedHeight(52)
+        self._all_tags = []
+        self._all_asset_names = []
+        self._active_tags = []
+        self._pills = {}
+
+        self.setObjectName("searchInput")
+        self.setFixedHeight(30)
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setCursor(Qt.IBeamCursor)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(14, 8, 14, 8)
-        layout.setSpacing(20)
+        layout.setContentsMargins(8, 1, 4, 1)
+        layout.setSpacing(4)
+        layout.setAlignment(Qt.AlignVCenter)
 
-        def _section(label_text, options, signal_slot):
-            col = QHBoxLayout()
-            col.setSpacing(6)
-            lbl = QLabel(label_text)
-            lbl.setStyleSheet(
-                "font-size: 10px; color: %s; font-family: 'IBM Plex Mono', monospace;"
-                " background: transparent;" % TEXT_TERTIARY
+        # Search icon
+        icon = QLabel("🔍")
+        icon.setStyleSheet(
+            "font-size: 11px; color: %s; background: transparent; border: none;" % TEXT_TERTIARY
+        )
+        icon.setFixedWidth(16)
+        layout.addWidget(icon)
+
+        # Scroll area for pills + inline text input
+        self._pill_area = QWidget()
+        self._pill_area.setStyleSheet("background: transparent;")
+        self._pill_layout = QHBoxLayout(self._pill_area)
+        self._pill_layout.setContentsMargins(0, 0, 0, 0)
+        self._pill_layout.setSpacing(3)
+        self._pill_layout.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+
+        # Inline text input (shares space with pills)
+        self._edit = QLineEdit()
+        self._edit.setFrame(False)
+        self._edit.setStyleSheet(
+            "QLineEdit {"
+            "  background: transparent; border: none; outline: none; padding: 0 2px;"
+            "  color: %s; font-size: 12px;"
+            "  font-family: 'IBM Plex Sans', 'Segoe UI', sans-serif;"
+            "}"
+            "QLineEdit:focus { border: none; outline: none; }"
+        )
+        self._edit.setPlaceholderText("Search assets…")
+        self._edit.setMinimumWidth(80)
+        self._edit.textChanged.connect(self._onTextChanged)
+        self._edit.keyPressEvent = self._onEditKeyPress
+        self._edit.installEventFilter(self)
+        self._pill_layout.addWidget(self._edit, 1)
+
+        layout.addWidget(self._pill_area, 1)
+
+        # Autocomplete dropdown
+        self._popup = _TagDropdown(self)
+        self._popup.tagSelected.connect(self._addTagFromPopup)
+        self._popup.nameSelected.connect(self._searchByName)
+
+        self.setStyleSheet(self._containerStyle())
+        QApplication.instance().installEventFilter(self)
+
+    def _containerStyle(self):
+        return (
+            "#searchInput {"
+            "  background-color: %s;"
+            "  border: 1px solid %s;"
+            "  border-radius: 6px;"
+            "}"
+            "#searchInput QLineEdit {"
+            "  background: transparent; border: none; border-radius: 0;"
+            "}"
+        ) % (BG_PRIMARY, BORDER_MID)
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def setTags(self, tags):
+        self._all_tags = list(tags)
+
+    def setAssets(self, names):
+        self._all_asset_names = [n for n in names if n]
+
+    # ------------------------------------------------------------------
+    # Internal
+    # ------------------------------------------------------------------
+
+    def _onTextChanged(self, text):
+        if not text.strip():
+            self.searchChanged.emit("")   # clear any active text-search filter
+        self._showAutocomplete(text)
+
+    def _showAutocomplete(self, text):
+        if not text.strip():
+            self._popup.hide()
+            return
+        q = text.strip().lower()
+        tags  = [t for t in self._all_tags
+                 if q in t.lower() and t not in self._active_tags][:8]
+        names = [n for n in self._all_asset_names
+                 if q in n.lower()][:6]
+        if not tags and not names:
+            self._popup.hide()
+            return
+        self._popup.setItems(tags, names)
+        pos = self.mapToGlobal(self.rect().bottomLeft())
+        self._popup.move(pos.x(), pos.y() + 2)
+        self._popup.show()
+
+    def _onEditKeyPress(self, e):
+        if e.key() == Qt.Key_Down:
+            if self._popup.isVisible():
+                self._popup.selectNext()
+            e.accept()
+            return
+        if e.key() == Qt.Key_Up:
+            if self._popup.isVisible():
+                self._popup.selectPrev()
+            e.accept()
+            return
+        if e.key() in (Qt.Key_Enter, Qt.Key_Return):
+            # If popup has a highlighted item, activate it
+            if self._popup.isVisible() and self._popup.activateSelected():
+                e.accept()
+                return
+            # Otherwise use typed text
+            text = self._edit.text().strip()
+            self._popup.hide()
+            if text:
+                tag = self._findTag(text)
+                if tag:
+                    self._addTag(tag)
+                    self._edit.setText("")
+                else:
+                    self.searchChanged.emit(text)
+            e.accept()
+            return
+        if e.key() == Qt.Key_Escape:
+            self._popup.hide()
+            e.accept()
+            return
+        if e.key() == Qt.Key_Backspace and not self._edit.text():
+            if self._active_tags:
+                self._removeTag(self._active_tags[-1])
+            e.accept()
+            return
+        QLineEdit.keyPressEvent(self._edit, e)
+
+    def _findTag(self, text):
+        q = text.lower()
+        # Exact match
+        for t in self._all_tags:
+            if t.lower() == q:
+                return t
+        # Prefix match
+        for t in self._all_tags:
+            if t.lower().startswith(q):
+                return t
+        # Partial match
+        for t in self._all_tags:
+            if q in t.lower():
+                return t
+        return None
+
+    def _addTagFromPopup(self, tag):
+        self._addTag(tag)
+        self._edit.setText("")
+        self._edit.setFocus()
+
+    def _searchByName(self, name):
+        self._edit.setText(name)
+        self.searchChanged.emit(name)
+        self._edit.setFocus()
+
+    def _addTag(self, tag):
+        if tag in self._active_tags:
+            return
+        self._active_tags.append(tag)
+        pill = _TagPill(tag)
+        pill.removed.connect(self._removeTag)
+        # Insert before the QLineEdit (last item in layout)
+        idx = self._pill_layout.count() - 1
+        self._pill_layout.insertWidget(idx, pill)
+        self._pills[tag] = pill
+        self.tagAdded.emit(tag)
+
+    def _removeTag(self, tag):
+        if tag not in self._active_tags:
+            return
+        self._active_tags.remove(tag)
+        pill = self._pills.pop(tag, None)
+        if pill:
+            self._pill_layout.removeWidget(pill)
+            pill.deleteLater()
+        self.tagRemoved.emit(tag)
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.MouseButtonPress and self._popup.isVisible():
+            try:
+                if not self._popup.geometry().contains(event.globalPos()):
+                    self._popup.hide()
+            except Exception:
+                pass
+        return super().eventFilter(obj, event)
+
+
+class _TagPill(QWidget):
+    """A removable tag chip displayed inside the search bar."""
+
+    removed = Signal(str)
+
+    def __init__(self, tag, parent=None):
+        super().__init__(parent)
+        self._tag = tag
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setStyleSheet(
+            "background: %s; border: 0.5px solid %s; border-radius: 10px;"
+            % (ACCENT_BG, ACCENT_BORDER)
+        )
+        self.setCursor(Qt.PointingHandCursor)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(6, 1, 2, 1)
+        layout.setSpacing(2)
+
+        label = QLabel(tag)
+        label.setStyleSheet(
+            "color: %s; font-size: 10px; border: none; background: transparent;"
+            " font-family: 'IBM Plex Sans', sans-serif;"
+            % ACCENT_TEXT
+        )
+        layout.addWidget(label)
+
+        btn = QPushButton("×")
+        btn.setFixedSize(14, 14)
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.setStyleSheet(
+            "QPushButton {"
+            "  background: transparent; border: none; color: %s;"
+            "  font-size: 11px; padding: 0; margin: 0;"
+            "}"
+            "QPushButton:hover { color: %s; }"
+            % (ACCENT_TEXT, TEXT_PRIMARY)
+        )
+        btn.clicked.connect(lambda: self.removed.emit(self._tag))
+        layout.addWidget(btn)
+
+        self.setFixedHeight(20)
+        self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+
+
+class _TagDropdown(QFrame):
+    """Autocomplete popup showing matching tags and asset names."""
+
+    tagSelected  = Signal(str)
+    nameSelected = Signal(str)
+
+    _BTN_H = 28
+
+    def __init__(self, parent=None):
+        super().__init__(parent, Qt.Tool | Qt.FramelessWindowHint)
+        self.setAttribute(Qt.WA_ShowWithoutActivating)   # never steal focus from _edit
+        self.setObjectName("tagDropdown")
+        self.setStyleSheet(
+            "#tagDropdown {"
+            "  background: %s; border: 1px solid %s; border-radius: 6px;"
+            "  padding: 4px 0;"
+            "}" % (BG_PRIMARY, BORDER_MID)
+        )
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(0, 4, 0, 4)
+        self._layout.setSpacing(0)
+        self._btns = []   # (signal, arg, btn) — interactive items only
+        self._sel  = -1   # currently highlighted index
+
+    def _clear(self):
+        while self._layout.count():
+            item = self._layout.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+        self._btns = []
+        self._sel  = -1
+
+    def _addHeader(self, text):
+        lbl = QLabel(text)
+        lbl.setStyleSheet(
+            "color: %s; font-size: 10px; font-family: 'IBM Plex Mono', monospace;"
+            " letter-spacing: 1px; padding: 4px 12px 2px; background: transparent;"
+            % TEXT_TERTIARY
+        )
+        self._layout.addWidget(lbl)
+
+    def _addBtn(self, label, signal, arg, icon_prefix=""):
+        btn = QPushButton(icon_prefix + label)
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.setFixedHeight(self._BTN_H)
+        self._applyBtnStyle(btn, selected=False)
+        btn.clicked.connect(lambda _, a=arg: signal.emit(a))
+        self._layout.addWidget(btn)
+        self._btns.append((signal, arg, btn))
+
+    def _applyBtnStyle(self, btn, selected):
+        if selected:
+            btn.setStyleSheet(
+                "QPushButton {"
+                "  background: %s; border: none; color: %s;"
+                "  font-size: 12px; font-family: 'IBM Plex Sans', sans-serif;"
+                "  padding: 0 12px; text-align: left;"
+                "}" % (BG_SECONDARY, TEXT_PRIMARY)
             )
-            combo = QComboBox()
-            combo.setFixedWidth(150)
-            combo.addItems(options)
-            combo.currentTextChanged.connect(signal_slot)
-            col.addWidget(lbl)
-            col.addWidget(combo)
-            return col, combo
+        else:
+            btn.setStyleSheet(
+                "QPushButton {"
+                "  background: transparent; border: none; color: %s;"
+                "  font-size: 12px; font-family: 'IBM Plex Sans', sans-serif;"
+                "  padding: 0 12px; text-align: left;"
+                "}"
+                "QPushButton:hover { background: %s; color: %s; }"
+                % (TEXT_SECONDARY, BG_SECONDARY, TEXT_PRIMARY)
+            )
 
-        dcc_col, self.dcc_combo   = _section("DCC",  self._DCC_OPTIONS,  self._emit)
-        type_col, self.type_combo = _section("TYPE", self._TYPE_OPTIONS, self._emit)
+    def selectNext(self):
+        if not self._btns:
+            return
+        new = min(self._sel + 1, len(self._btns) - 1)
+        self._highlight(new)
 
-        layout.addLayout(dcc_col)
-        layout.addLayout(type_col)
-        layout.addStretch()
+    def selectPrev(self):
+        if not self._btns:
+            return
+        new = max(self._sel - 1, -1)
+        self._highlight(new)
 
-        reset_btn = QPushButton("Reset filters")
-        reset_btn.clicked.connect(self._reset)
-        layout.addWidget(reset_btn)
+    def _highlight(self, idx):
+        if self._sel >= 0 and self._sel < len(self._btns):
+            self._applyBtnStyle(self._btns[self._sel][2], selected=False)
+        self._sel = idx
+        if self._sel >= 0 and self._sel < len(self._btns):
+            self._applyBtnStyle(self._btns[self._sel][2], selected=True)
 
-    def _emit(self, _=None):
-        dcc  = self.dcc_combo.currentText()
-        typ  = self.type_combo.currentText()
-        dcc_val  = "" if dcc  == "All DCCs"   else dcc.split()[0]
-        type_val = "" if typ  == "All types"  else typ
-        self.filtersChanged.emit(dcc_val, type_val)
+    def activateSelected(self):
+        """Fire the signal for the highlighted item. Returns True if something was activated."""
+        if 0 <= self._sel < len(self._btns):
+            signal, arg, _ = self._btns[self._sel]
+            signal.emit(arg)
+            return True
+        return False
 
-    def _reset(self):
-        self.dcc_combo.setCurrentIndex(0)
-        self.type_combo.setCurrentIndex(0)
+    def setItems(self, tags, asset_names):
+        self._clear()
+        row_count = 0
+
+        if tags:
+            self._addHeader("TAGS")
+            row_count += 1
+            for t in tags:
+                self._addBtn(t, self.tagSelected, t, "# ")
+                row_count += 1
+
+        if asset_names:
+            if tags:
+                sep = QFrame()
+                sep.setFrameShape(QFrame.HLine)
+                sep.setFixedHeight(1)
+                sep.setStyleSheet("background: %s; border: none; margin: 4px 12px;" % BORDER_LIGHT)
+                self._layout.addWidget(sep)
+                row_count += 1
+            self._addHeader("ASSETS")
+            row_count += 1
+            for n in asset_names:
+                self._addBtn(n, self.nameSelected, n)
+                row_count += 1
+
+        self.setFixedWidth(260)
+        self.setFixedHeight(min(row_count * self._BTN_H + 16, 300))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Filter bar — inline row of per-category dropdown filters
+# ─────────────────────────────────────────────────────────────────────────────
+
+class _FilterBar(QWidget):
+    filtersChanged = Signal(dict)
+
+    _DEFS = [
+        ("dcc",      "All DCCs",      ["Houdini exclusive", "Maya exclusive"]),
+        ("type",     "All Types",     ["Materials", "Models", "HDAs", "HDRIs / Light rigs", "Textures"]),
+        ("filetype", "All Files",     [".usd", ".rs", ".mtlx", ".abc", ".hda", ".exr", ".hdr", ".hip", ".ma"]),
+        ("includes", "Includes",      ["Rig", "Textures", "Materials"]),
+        ("author",   "All Authors",   []),
+    ]
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("filterBar")
+        self.setFixedHeight(34)
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setStyleSheet(
+            "#filterBar { background: %s; }" % BG_SECONDARY
+        )
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(14, 0, 14, 0)
+        layout.setSpacing(2)
+
+        self._btns = {}
+        self._state = {}
+
+        for key, label, opts in self._DEFS:
+            btn = _FilterDropBtn(label, opts)
+            btn.selectionChanged.connect(lambda vals, k=key: self._onChange(k, vals))
+            self._btns[key] = btn
+            layout.addWidget(btn)
+
+        # Project filter — search-as-you-type instead of checkbox list
+        self._project_btn = _ProjectFilterBtn()
+        self._project_btn.selectionChanged.connect(lambda vals: self._onChange("project", vals))
+        layout.addWidget(self._project_btn)
+
+        layout.addStretch(1)
+
+    def setAuthors(self, authors):
+        self._btns["author"].setOptions(list(authors))
+
+    def setProjects(self, projects):
+        self._project_btn.setProjects(projects)
+
+    def _onChange(self, key, vals):
+        self._state[key] = vals
+        # Translate UI labels → filter values expected by _applyFilters
+        state = dict(self._state)
+        dcc = set()
+        for x in state.get("dcc", set()):
+            if x == "Houdini exclusive":
+                dcc.add("Houdini")
+            elif x == "Maya exclusive":
+                dcc.add("Maya")
+        state["dcc"] = dcc
+
+        type_vals = state.get("type", set())
+        state["type"] = {"Lighting" if x == "HDRIs / Light rigs" else x for x in type_vals}
+
+        self.filtersChanged.emit(state)
+
+
+class _FilterDropBtn(QWidget):
+    selectionChanged = Signal(set)
+
+    def __init__(self, default_label, options, parent=None):
+        super().__init__(parent)
+        self._default_label = default_label
+        self._options = list(options)
+        self._selected = set()
+        self._popup_ref = None
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        self._btn = QPushButton(default_label + "  ▾")
+        self._btn.setCursor(Qt.PointingHandCursor)
+        self._btn.setStyleSheet(
+            "QPushButton {"
+            "  color: %s; background: transparent; border: none;"
+            "  font-size: 11px; font-family: 'IBM Plex Sans', sans-serif;"
+            "  padding: 4px 8px; border-radius: 4px;"
+            "}"
+            "QPushButton:hover { background: %s; color: %s; }"
+            % (TEXT_SECONDARY, BG_TERTIARY, TEXT_PRIMARY)
+        )
+        self._btn.clicked.connect(self._showPopup)
+        layout.addWidget(self._btn)
+
+    def setOptions(self, options):
+        self._options = list(options)
+        self._selected = self._selected & set(options)
+        self._updateLabel()
+
+    def _updateLabel(self):
+        if not self._selected:
+            label = self._default_label
+            color = TEXT_SECONDARY
+        elif len(self._selected) == 1:
+            label = next(iter(self._selected))
+            color = ACCENT
+        else:
+            label = "%d selected" % len(self._selected)
+            color = ACCENT
+        self._btn.setText(label + "  ▾")
+        self._btn.setStyleSheet(
+            "QPushButton {"
+            "  color: %s; background: transparent; border: none;"
+            "  font-size: 11px; font-family: 'IBM Plex Sans', sans-serif;"
+            "  padding: 4px 8px; border-radius: 4px;"
+            "}"
+            "QPushButton:hover { background: %s; color: %s; }"
+            % (color, BG_TERTIARY, TEXT_PRIMARY)
+        )
+
+    def _showPopup(self):
+        if not self._options:
+            return
+        self._popup_ref = _CheckPopup(self._options, self._selected)
+        self._popup_ref.changed.connect(self._onChanged)
+        pos = self._btn.mapToGlobal(self._btn.rect().bottomLeft())
+        self._popup_ref.move(pos)
+        self._popup_ref.show()
+
+    def _onChanged(self, selected):
+        self._selected = selected
+        self._updateLabel()
+        self.selectionChanged.emit(selected)
+
+
+class _ProjectFilterBtn(QWidget):
+    """Filter bar button for projects — click to open a search-as-you-type popup."""
+    selectionChanged = Signal(set)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._projects = []
+        self._selected = set()
+        self._popup_ref = None
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        self._btn = QPushButton("All Projects  ▾")
+        self._btn.setCursor(Qt.PointingHandCursor)
+        self._btn.clicked.connect(self._showPopup)
+        layout.addWidget(self._btn)
+        self._updateStyle()
+
+    def setProjects(self, projects):
+        self._projects = list(projects)
+        self._selected = self._selected & set(projects)
+        self._updateLabel()
+
+    def _updateLabel(self):
+        if not self._selected:
+            label = "All Projects"
+            color = TEXT_SECONDARY
+        elif len(self._selected) == 1:
+            label = next(iter(self._selected))
+            color = ACCENT
+        else:
+            label = "%d projects" % len(self._selected)
+            color = ACCENT
+        self._btn.setText(label + "  ▾")
+        self._updateStyle(color)
+
+    def _updateStyle(self, color=None):
+        c = color or TEXT_SECONDARY
+        self._btn.setStyleSheet(
+            "QPushButton {"
+            "  color: %s; background: transparent; border: none;"
+            "  font-size: 11px; font-family: 'IBM Plex Sans', sans-serif;"
+            "  padding: 4px 8px; border-radius: 4px;"
+            "}"
+            "QPushButton:hover { background: %s; color: %s; }"
+            % (c, BG_TERTIARY, TEXT_PRIMARY)
+        )
+
+    def _showPopup(self):
+        if not self._projects:
+            return
+        self._popup_ref = _ProjectSearchPopup(self._projects, self._selected)
+        self._popup_ref.selectionChanged.connect(self._onChanged)
+        pos = self._btn.mapToGlobal(self._btn.rect().bottomLeft())
+        self._popup_ref.move(pos)
+        self._popup_ref.show()
+        self._popup_ref.focusSearch()
+
+    def _onChanged(self, selected):
+        self._selected = selected
+        self._updateLabel()
+        self.selectionChanged.emit(selected)
+
+
+class _ProjectSearchPopup(QFrame):
+    """Popup with a search input + filtered project list."""
+    selectionChanged = Signal(set)
+
+    def __init__(self, projects, selected, parent=None):
+        super().__init__(None, Qt.Popup)
+        self._all_projects = list(projects)
+        self._selected = set(selected)
+
+        self.setObjectName("projectPopup")
+        self.setFixedWidth(240)
+        self.setStyleSheet("""
+            #projectPopup {
+                background: %(bg)s;
+                border: 1px solid %(bm)s;
+                border-radius: 6px;
+            }
+            QLineEdit {
+                background: %(bg2)s;
+                border: 1px solid %(bl)s;
+                border-radius: 4px;
+                padding: 4px 8px;
+                color: %(tp)s;
+                font-size: 11px;
+            }
+            QScrollArea { background: transparent; border: none; }
+        """ % dict(bg=BG_PRIMARY, bg2=BG_SECONDARY, bl=BORDER_LIGHT,
+                   bm=BORDER_MID, tp=TEXT_PRIMARY))
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(8, 8, 8, 8)
+        root.setSpacing(6)
+
+        self._search = QLineEdit()
+        self._search.setPlaceholderText("Search projects…")
+        self._search.textChanged.connect(self._onSearch)
+        root.addWidget(self._search)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setMaximumHeight(280)
+
+        self._list_widget = QWidget()
+        self._list_widget.setStyleSheet("background: transparent;")
+        self._list_layout = QVBoxLayout(self._list_widget)
+        self._list_layout.setContentsMargins(0, 0, 0, 0)
+        self._list_layout.setSpacing(0)
+
+        scroll.setWidget(self._list_widget)
+        root.addWidget(scroll)
+
+        self._buildList(self._all_projects)
+
+    def focusSearch(self):
+        self._search.setFocus()
+
+    def _buildList(self, projects):
+        while self._list_layout.count():
+            item = self._list_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        for proj in projects:
+            row = _ProjectRow(proj, proj in self._selected)
+            row.toggled.connect(self._onToggle)
+            self._list_layout.addWidget(row)
+
+        self._list_layout.addStretch()
+
+    def _onSearch(self, text):
+        q = text.strip().lower()
+        matches = [p for p in self._all_projects if q in p.lower()] if q else self._all_projects
+        self._buildList(matches)
+
+    def _onToggle(self, project, checked):
+        if checked:
+            self._selected.add(project)
+        else:
+            self._selected.discard(project)
+        self.selectionChanged.emit(set(self._selected))
+
+
+class _ProjectRow(QWidget):
+    toggled = Signal(str, bool)
+
+    def __init__(self, project, checked, parent=None):
+        super().__init__(parent)
+        self._project = project
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setStyleSheet("background: transparent;")
+        self.setCursor(Qt.PointingHandCursor)
+        self._checked = checked
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(4, 2, 4, 2)
+        layout.setSpacing(8)
+
+        self._dot = QLabel("●" if checked else "○")
+        self._dot.setFixedWidth(12)
+        self._dot.setStyleSheet(
+            "font-size: 9px; color: %s; background: transparent;" % (ACCENT if checked else TEXT_TERTIARY)
+        )
+        layout.addWidget(self._dot)
+
+        lbl = QLabel(project)
+        lbl.setStyleSheet(
+            "font-size: 11px; color: %s; background: transparent;"
+            " font-family: 'IBM Plex Sans', sans-serif;" % (TEXT_PRIMARY if checked else TEXT_SECONDARY)
+        )
+        layout.addWidget(lbl, 1)
+        self.setFixedHeight(26)
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            self._checked = not self._checked
+            self._dot.setText("●" if self._checked else "○")
+            self._dot.setStyleSheet(
+                "font-size: 9px; color: %s; background: transparent;"
+                % (ACCENT if self._checked else TEXT_TERTIARY)
+            )
+            self.toggled.emit(self._project, self._checked)
+
+
+class _CheckPopup(QFrame):
+    changed = Signal(set)
+
+    def __init__(self, options, selected, parent=None):
+        super().__init__(None, Qt.Popup)
+        self._selected = set(selected)
+        self._checkboxes = {}
+
+        self.setObjectName("checkPopup")
+        self.setStyleSheet("""
+            #checkPopup {{
+                background: {bg};
+                border: 1px solid {bm};
+                border-radius: 6px;
+                padding: 4px 0;
+            }}
+            QCheckBox {{
+                color: {ts};
+                font-family: "IBM Plex Sans", sans-serif;
+                font-size: 12px;
+                spacing: 8px;
+                background: transparent;
+                padding: 3px 12px;
+                min-height: 22px;
+            }}
+            QCheckBox:hover {{ color: {tp}; }}
+            QCheckBox::indicator {{
+                width: 13px; height: 13px;
+                border: 1px solid {bl};
+                border-radius: 3px;
+                background: {bg2};
+            }}
+            QCheckBox::indicator:checked {{
+                background: {accent};
+                border-color: {accent};
+            }}
+        """.format(
+            bg=BG_PRIMARY, bg2=BG_SECONDARY, bl=BORDER_LIGHT, bm=BORDER_MID,
+            ts=TEXT_SECONDARY, tp=TEXT_PRIMARY, accent=ACCENT,
+        ))
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 4, 0, 4)
+        layout.setSpacing(0)
+
+        for opt in options:
+            cb = QCheckBox(opt)
+            cb.setChecked(opt in selected)
+            cb.stateChanged.connect(self._onChanged)
+            self._checkboxes[opt] = cb
+            layout.addWidget(cb)
+
+        self.setFixedWidth(200)
+
+    def _onChanged(self):
+        self._selected = {opt for opt, cb in self._checkboxes.items() if cb.isChecked()}
+        self.changed.emit(self._selected)
