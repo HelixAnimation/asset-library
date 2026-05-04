@@ -123,12 +123,13 @@ Lighting
 - "+ tag" button at end to add new tags
 
 ### Filters dropdown (toolbar)
-Groups:
-- **DCC**: All / Houdini exclusive / Maya exclusive
+Tabbed panel with horizontal tab bar (DCC | TYPE | FILE | INC | AUTH). Fixed 220x280 popup anchored below the Filters button. Checkboxes laid out in 2 columns per tab. One tab visible at a time — no resizing or overflow issues. Tabs:
+- **DCC**: All DCCs / Houdini exclusive / Maya exclusive
 - **Type**: Materials / Models / HDAs / HDRIs+Light rigs / Textures
-- **File type**: .usd / .rs / .mtlx / .abc / .hda / .exr / .hdr / .hip / .ma
+- **File**: .usd / .rs / .mtlx / .abc / .hda / .exr / .hdr / .hip / .ma
 - **Includes**: Rig / Textures / Materials
-- **Author**
+- **Author**: dynamic list from DB
+All filters are additive across tabs.
 
 ### Import dialog
 Triggered by **Import** button (toolbar).
@@ -189,37 +190,48 @@ A finalized HTML mockup (`index.html`) exists and should be used as the visual s
 
 ---
 
-## What still needs to be built
+## Build status
 
-### Phase 1 — Foundation
-1. **Prism 2 plugin scaffold** — `AssetLibraryPro.py` plugin class, register with Prism, replace/hook the library tab
-2. **SQLite schema** — tables: `assets`, `categories`, `tags`, `asset_tags`, `favorites`, `recently_used`; migrations strategy for schema changes
+### Phase 1 — Foundation ✅
+1. ✅ **Prism 2 plugin scaffold** — plugin class registers with Prism, hooks the library tab
+2. ✅ **SQLite schema** — `assets`, `categories`, `tags`, `asset_tags`, `favorites`, `recently_used`
 
-### Phase 2 — Data layer
-3. **DB read/write layer** (`core/db.py`) — CRUD for all tables, queries for filtering by category/tag/DCC/filetype/author
-4. **Asset discovery** — scan NAS for Prism-published assets, populate `library.db` on first run and keep in sync
+### Phase 2 — Data layer ✅
+3. ✅ **DB read/write layer** (`core/db.py`) — full CRUD, batch queries for tags/versions/filetypes/favorites
+4. ⬜ **Asset discovery** — NAS scan to populate `library.db` on first run and keep in sync
 
-### Phase 3 — UI panel
-5. **Main Qt panel** (`ui/library_browser.py`) — split layout: sidebar tree (185px) + thumbnail grid, inside Prism's panel system
-6. **Sidebar tree** — category/subcategory tree with live asset counts; Favorites and Recent sections at top; clicking filters the grid
-7. **Asset cards** — thumbnail widget, name/subtitle, star toggle in thumbnail corner; thumbnail gallery (render type dots + arrows)
-8. **Toolbar** — search (real-time filter), sort dropdown, size slider, filters dropdown, Import button
-9. **Filters dropdown** — collapsible sections: DCC / Type / File type / Includes / Author; all filters additive
-10. **Right-click context menu** — version picker, file type picker, View USD, View USD via Prism, Edit asset
-11. **Tooltip** — hover overlay: name, type, author, renderer, DCC, includes, tags; updates when file type changes
-12. **Import dialog** (`ui/publish_dialog.py`) — source, name, version, category + subcategory (with custom), file type, renderer, DCC, includes, tags
+### Phase 3 — UI panel ✅
+5. ✅ **Main Qt panel** (`ui/library_browser.py`) — sidebar + grid + inspector split layout
+6. ✅ **Sidebar tree** — category/subcategory tree, live counts, Favorites/Recent; clicking filters the grid; subcategory click no longer collapses parent; hover uses 300ms text-color fade (no bg flash)
+7. ✅ **Asset cards** — thumbnail, name/subtitle, star toggle, 2D/3D view mode toggle, draggable
+8. ✅ **Toolbar** — search with inline tag pills + autocomplete, sort dropdown, size slider, filters dropdown, Import button
+9. ✅ **Filters dropdown** — DCC / TYPE / FILE / INC / AUTH / PROJECT tabs, all additive
+10. ✅ **Right-click context menu** — version picker, file type picker, View USD, View USD via Prism, Edit asset
+11. ✅ **Inspector panel** (`ui/inspector.py`) — fullscreen preview, zoom/pan, asset metadata, version dropdown, ⋮ menu
+12. ✅ **Import dialog** (`ui/publish_dialog.py`) — source, name, version, category + subcategory, file type, renderer, DCC, includes, tags
 
-### Phase 4 — DCC integration
-13. **Drag and drop** — drag card into Houdini or Maya viewport; import or reference at selected version/filetype via `core/dcc_bridge.py`
-14. **View USD** — launch usdview (or Houdini/Maya USD viewer) for the selected asset
-15. **View USD via Prism** — open asset through Prism's version browser / reference system
-16. **Houdini bridge** — Python API calls for import, reference, usdview launch
-17. **Maya bridge** — `maya.cmds` equivalent for import and reference
+### Phase 4 — DCC integration ⬜
+13. ⬜ **Drag and drop** — drag card into Houdini or Maya viewport via `core/dcc_bridge.py`
+14. ⬜ **View USD** — launch usdview (or Houdini/Maya USD viewer)
+15. ⬜ **View USD via Prism** — open through Prism's version browser
+16. ⬜ **Houdini bridge** — Python API calls for import, reference, usdview
+17. ⬜ **Maya bridge** — `maya.cmds` equivalent
 
-### Phase 5 — Asset ingestion
-18. **Import pipeline** — validate source file, copy to NAS under correct Prism path, write metadata to DB, trigger thumbnail generation
-19. **Thumbnail generation** — strategy TBD: auto-render via headless Houdini/RS, or manual screenshot on publish; store as sidecar `.png` next to Prism files
-20. **Edit asset** — pre-fill import dialog with existing metadata; update DB record without re-ingesting file
+### Phase 5 — Asset ingestion ⬜
+18. ⬜ **Import pipeline** — validate, copy to NAS, write DB, trigger thumbnail generation
+19. ⬜ **Thumbnail generation** — strategy TBD: headless Houdini/RS or manual screenshot
+20. ⬜ **Edit asset** — pre-fill import dialog from existing DB record
+
+---
+
+## Qt / Windows rendering notes
+
+Hard-won fixes to avoid re-breaking:
+
+- **QMenu two-tone background** — always set `background: transparent` on `QMenu::item`; without it Windows paints item backgrounds natively at a different color than the menu frame.
+- **QComboBox popup missing right border** — don't style `QAbstractItemView` with a border; instead override `showPopup`, find `self.view().parentWidget()` (the `QComboBoxPrivateContainer`), give it an object name, and style it with `#name { border: ... }`. Also set `QAbstractItemView { border: none }` and `QScrollBar { width: 0 }` in the same stylesheet.
+- **QComboBox popup auto-scroll on first open** — call `self.view().setAutoScroll(False)` and `self.view().scrollToTop()` in `showPopup`.
+- **Grid card sizing** — use `math.ceil((avail + GAP) / (card_w + GAP))` for column count so cards snap to a new column exactly when they reach `_card_width`, never exceeding it. For partial rows (fewer cards than `fit_cols`), skip the stretch and use `_card_width` directly.
 
 ---
 
