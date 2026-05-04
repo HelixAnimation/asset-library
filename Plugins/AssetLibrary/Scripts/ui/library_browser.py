@@ -8,7 +8,7 @@ from qtpy.QtWidgets import (
     QFrame, QSizePolicy, QApplication, QCheckBox,
     QGridLayout, QGraphicsDropShadowEffect,
 )
-from qtpy.QtCore import Qt, QTimer, Signal, QSize, QEvent
+from qtpy.QtCore import Qt, QTimer, Signal, QSize, QEvent, QPropertyAnimation, QEasingCurve
 from qtpy.QtGui import QFont, QIcon, QColor
 
 from ui.styles import (
@@ -113,16 +113,20 @@ class LibraryBrowser(QMainWindow):
         body_layout.addWidget(self._buildContent(), 1)
 
         self.inspector = InspectorPanel()
-        self.inspector.setFixedWidth(340)
+        self.inspector.setMinimumWidth(0)
+        self.inspector.setMaximumWidth(0)   # start closed
         self.inspector.closeRequested.connect(self._hideInspector)
         self.inspector.tagClicked.connect(self._onTagAdded)
-        self.inspector.hide()
 
         _shadow = QGraphicsDropShadowEffect(self.inspector)
         _shadow.setBlurRadius(24)
         _shadow.setOffset(-6, 0)
         _shadow.setColor(QColor(0, 0, 0, 60))
         self.inspector.setGraphicsEffect(_shadow)
+
+        self._inspector_anim = QPropertyAnimation(self.inspector, b"maximumWidth")
+        self._inspector_anim.setDuration(250)
+        self._inspector_anim.setEasingCurve(QEasingCurve.OutCubic)
 
         body_layout.addWidget(self.inspector)
 
@@ -510,6 +514,11 @@ class LibraryBrowser(QMainWindow):
         try:
             self.inspector.setAsset(asset_data, versions)
             self.inspector.show()
+            self._inspector_anim.stop()
+            self._inspector_anim.setEasingCurve(QEasingCurve.OutCubic)
+            self._inspector_anim.setStartValue(self.inspector.maximumWidth())
+            self._inspector_anim.setEndValue(340)
+            self._inspector_anim.start()
         except Exception:
             logger.exception(
                 "Failed to populate inspector for asset id=%r name=%r",
@@ -518,13 +527,25 @@ class LibraryBrowser(QMainWindow):
             )
 
     def _hideInspector(self):
-        self.inspector.hide()
         if self._selected_card:
             self._selected_card.setSelected(False)
             self._selected_card = None
+        self._inspector_anim.stop()
+        self._inspector_anim.setEasingCurve(QEasingCurve.InCubic)
+        self._inspector_anim.setStartValue(self.inspector.maximumWidth())
+        self._inspector_anim.setEndValue(0)
+        self._inspector_anim.finished.connect(self._onInspectorClosed)
+        self._inspector_anim.start()
+
+    def _onInspectorClosed(self):
+        try:
+            self._inspector_anim.finished.disconnect(self._onInspectorClosed)
+        except Exception:
+            pass
+        self.inspector.hide()
 
     def keyPressEvent(self, e):
-        if e.key() == Qt.Key_Escape and self.inspector.isVisible():
+        if e.key() == Qt.Key_Escape and self.inspector.maximumWidth() > 0:
             self._hideInspector()
         else:
             super().keyPressEvent(e)
