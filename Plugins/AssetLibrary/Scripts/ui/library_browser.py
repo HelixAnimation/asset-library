@@ -192,7 +192,7 @@ class LibraryBrowser(QMainWindow):
         self.grid_scroll.setStyleSheet(
             "QScrollArea { background: %s; border: none; }" % BG_PRIMARY
         )
-        self.grid_scroll.installEventFilter(self)
+
 
         self.flow = _FlowWidget()
         self.flow.setStyleSheet("background: %s;" % BG_PRIMARY)
@@ -602,13 +602,6 @@ class LibraryBrowser(QMainWindow):
         self.setStyleSheet(get_stylesheet())
 
     def eventFilter(self, obj, event):
-        if obj is self.grid_scroll and event.type() == QEvent.Wheel:
-            if event.modifiers() & Qt.ControlModifier:
-                delta = event.angleDelta().y()
-                step  = int(delta / 120 * 10)   # ~10 px per scroll notch
-                new_w = max(_CARD_WIDTH_MIN, min(_CARD_WIDTH_MAX, self._card_width + step))
-                self.size_slider.setValue(new_w)
-                return True   # consume — don't scroll the grid
         return super().eventFilter(obj, event)
 
 
