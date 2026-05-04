@@ -268,7 +268,7 @@ class _SidebarItem(QWidget):
         self.setFixedHeight(28 if not self._is_child else 24)
 
         self._hover_anim = QVariantAnimation(self)
-        self._hover_anim.setDuration(100)
+        self._hover_anim.setDuration(300)
         self._hover_anim.setEasingCurve(QEasingCurve.OutCubic)
         self._hover_anim.valueChanged.connect(self._onHoverColor)
 
