@@ -42,7 +42,7 @@ class PublishDialog(QDialog):
         self._is_edit = bool(self.prefill.get("_edit_id"))
 
         self.setWindowTitle("Edit Asset" if self._is_edit else "Import Asset")
-        self.setFixedWidth(450)
+        self.setFixedWidth(452)
         self.setStyleSheet(self._buildStylesheet())
         self._tags = list(self.prefill.get("tags", []))
         self._build()
@@ -462,8 +462,9 @@ class _FileListWidget(QFrame):
         "QListWidget { background: transparent; border: none; outline: none; }"
         "QListWidget::item { border: none; outline: none; }"
         "QListWidget::item:focus { border: none; outline: none; }"
-        "QScrollBar:vertical { width: 6px; background: transparent; }"
-        "QScrollBar::handle:vertical { background: %(bm)s; border-radius: 3px; min-height: 20px; }"
+        "QScrollBar:vertical { width: 8px; background: transparent; }"
+        "QScrollBar::handle:vertical { background: %(bm)s; border-radius: 4px; min-height: 20px; }"
+        "QScrollBar::handle:vertical:hover { background: %(ts)s; }"
         "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }"
     )
     _SS_FILLED = (
@@ -471,8 +472,9 @@ class _FileListWidget(QFrame):
         "QListWidget { background: transparent; border: none; outline: none; }"
         "QListWidget::item { border: none; outline: none; }"
         "QListWidget::item:focus { border: none; outline: none; }"
-        "QScrollBar:vertical { width: 6px; background: transparent; }"
-        "QScrollBar::handle:vertical { background: %(bm)s; border-radius: 3px; min-height: 20px; }"
+        "QScrollBar:vertical { width: 8px; background: transparent; }"
+        "QScrollBar::handle:vertical { background: %(bm)s; border-radius: 4px; min-height: 20px; }"
+        "QScrollBar::handle:vertical:hover { background: %(ts)s; }"
         "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }"
     )
     _SS_ERR = "QFrame { background: %(bg)s; border: 1px solid #e04040; border-radius: 6px; }"
@@ -482,7 +484,7 @@ class _FileListWidget(QFrame):
         self.setAcceptDrops(True)
         self._files = []
 
-        ss_vals = dict(bg=BG_SECONDARY, bg2=BG_TERTIARY, bm=BORDER_MID, tp=TEXT_PRIMARY)
+        ss_vals = dict(bg=BG_SECONDARY, bg2=BG_TERTIARY, bm=BORDER_MID, tp=TEXT_PRIMARY, ts=TEXT_SECONDARY)
         self._empty_ss  = self._SS_EMPTY % ss_vals
         self._filled_ss = self._SS_FILLED % ss_vals
         self._error_ss  = self._SS_ERR % ss_vals
@@ -516,7 +518,7 @@ class _FileListWidget(QFrame):
         bottom = QHBoxLayout()
         bottom.setContentsMargins(0, 0, 0, 0)
         bottom.setSpacing(8)
-        add_btn = QPushButton("+ Add files…")
+        add_btn = QPushButton("+ Add…")
         add_btn.setStyleSheet(
             "border: none; background: transparent; color: %s; font-size: 11px;"
             " text-align: left; padding: 0;" % ACCENT
@@ -655,15 +657,35 @@ class _ThumbZone(QFrame):
         outer.setContentsMargins(8, 6, 8, 6)
         outer.setSpacing(4)
 
-        # Tile strip (hidden when empty)
+        # Tile strip inside a horizontal scroll area
         self._strip_widget = QWidget()
+        self._strip_widget.setFixedHeight(_ThumbTile._SIZE)
         self._strip_widget.setStyleSheet("background: transparent;")
         self._strip_layout = QHBoxLayout(self._strip_widget)
         self._strip_layout.setContentsMargins(0, 0, 0, 0)
         self._strip_layout.setSpacing(4)
         self._strip_layout.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        self._strip_widget.hide()
-        outer.addWidget(self._strip_widget)
+
+        _SCROLL_BAR_H = 8
+        self._strip_scroll = QScrollArea()
+        self._strip_scroll.setWidget(self._strip_widget)
+        self._strip_scroll.setWidgetResizable(False)
+        self._strip_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self._strip_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._strip_scroll.setFixedHeight(_ThumbTile._SIZE)
+        self._strip_scroll.setFrameShape(QFrame.NoFrame)
+        self._strip_scroll.setStyleSheet(
+            "QScrollArea { background: transparent; border: none; }"
+            "QScrollArea > QWidget > QWidget { background: transparent; }"
+            "QScrollBar:horizontal { height: %(h)dpx; background: transparent; margin: 0; }"
+            "QScrollBar::handle:horizontal { background: %(bm)s; border-radius: 4px; min-width: 20px; }"
+            "QScrollBar::handle:horizontal:hover { background: %(ts)s; }"
+            "QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }"
+            "QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: none; }"
+            % dict(h=_SCROLL_BAR_H, bm=BORDER_MID, ts=TEXT_SECONDARY)
+        )
+        self._strip_scroll.hide()
+        outer.addWidget(self._strip_scroll)
 
         # Empty placeholder
         self._placeholder = QLabel("Drop images here")
@@ -715,12 +737,6 @@ class _ThumbZone(QFrame):
                 self._images.append(p)
         self._refresh()
 
-    def _setPrimary(self, path):
-        if path in self._images and self._images[0] != path:
-            self._images.remove(path)
-            self._images.insert(0, path)
-            self._refresh()
-
     def _remove(self, path):
         if path in self._images:
             self._images.remove(path)
@@ -734,41 +750,59 @@ class _ThumbZone(QFrame):
 
         has = bool(self._images)
         self._placeholder.setVisible(not has)
-        self._strip_widget.setVisible(has)
+        self._strip_scroll.setVisible(has)
         self._sep.setVisible(has)
 
         for i, path in enumerate(self._images):
             tile = _ThumbTile(path, primary=(i == 0))
-            tile.clicked.connect(lambda p=path: self._setPrimary(p))
             tile.removeClicked.connect(lambda p=path: self._remove(p))
             self._strip_layout.addWidget(tile)
 
         n = len(self._images)
+        if n:
+            total_w = n * _ThumbTile._SIZE + max(0, n - 1) * 4
+            self._strip_widget.setFixedWidth(total_w)
         self._info_lbl.setText(
-            "%s  ·  %d  ·  click to set primary" % (self._label, n) if n > 1 else self._label
+            "%s  ·  %d  ·  drag to reorder" % (self._label, n) if n > 1 else self._label
         )
 
         self._updateHeight()
 
+    _MAX_TILES_NO_SCROLL = 5
+
     def _updateHeight(self):
         if self._images:
-            # margins(6+6) + tile(64) + spacing(4) + sep(1) + spacing(4) + bottom row(22)
-            self.setFixedHeight(107)
+            needs_scroll = len(self._images) > self._MAX_TILES_NO_SCROLL
+            scroll_h = _ThumbTile._SIZE + (8 if needs_scroll else 0)
+            self._strip_scroll.setFixedHeight(scroll_h)
+            self.setFixedHeight(12 + scroll_h + 4 + 1 + 4 + 20)
         else:
+            self._strip_scroll.setFixedHeight(_ThumbTile._SIZE)
             self.setFixedHeight(70)
 
     def getImages(self):
         return list(self._images)
 
     def dragEnterEvent(self, event):
-        if event.mimeData().hasUrls():
+        if event.mimeData().hasUrls() or event.mimeData().hasText():
             event.acceptProposedAction()
 
     def dragMoveEvent(self, event):
-        if event.mimeData().hasUrls():
+        if event.mimeData().hasUrls() or event.mimeData().hasText():
             event.acceptProposedAction()
 
     def dropEvent(self, event):
+        if event.mimeData().hasText():
+            path = event.mimeData().text()
+            if path in self._images:
+                scroll_x = self._strip_scroll.horizontalScrollBar().value()
+                tile_x = event.pos().x() - 8 + scroll_x
+                insert_idx = max(0, min(len(self._images) - 1, tile_x // (_ThumbTile._SIZE + 4)))
+                self._images.remove(path)
+                self._images.insert(insert_idx, path)
+                self._refresh()
+                event.acceptProposedAction()
+                return
         self._addImages([
             url.toLocalFile() for url in event.mimeData().urls()
             if url.toLocalFile()
@@ -778,16 +812,17 @@ class _ThumbZone(QFrame):
 
 
 class _ThumbTile(QWidget):
-    """64×64 thumbnail tile. Accent border when primary. Click to promote, X to remove."""
+    """Thumbnail tile. Accent border when primary. Drag to reorder, X to remove."""
 
-    clicked      = Signal()
     removeClicked = Signal()
-    _SIZE = 64
+    _SIZE = 76
 
     def __init__(self, path, primary=False):
         super().__init__()
-        self._primary = primary
-        self._hover   = False
+        self._path       = path
+        self._primary    = primary
+        self._hover      = False
+        self._drag_start = None
         self.setFixedSize(self._SIZE, self._SIZE)
         self.setCursor(Qt.PointingHandCursor)
         self.setAttribute(Qt.WA_NoSystemBackground)
@@ -859,10 +894,31 @@ class _ThumbTile(QWidget):
 
     def mousePressEvent(self, e):
         if e.button() == Qt.LeftButton:
-            if QRect(self._SIZE - 16, 2, 14, 14).contains(e.pos()):
+            self._drag_start   = e.pos()
+            self._press_on_x   = QRect(self._SIZE - 16, 2, 14, 14).contains(e.pos())
+        e.accept()
+
+    def mouseMoveEvent(self, e):
+        if not (e.buttons() & Qt.LeftButton) or self._drag_start is None:
+            return
+        if (e.pos() - self._drag_start).manhattanLength() < 8:
+            return
+        self._drag_start = None
+        from qtpy.QtGui import QDrag
+        from qtpy.QtCore import QMimeData
+        drag = QDrag(self)
+        mime = QMimeData()
+        mime.setText(self._path)
+        drag.setMimeData(mime)
+        drag.setPixmap(self.grab())
+        drag.setHotSpot(e.pos())
+        drag.exec_(Qt.MoveAction)
+
+    def mouseReleaseEvent(self, e):
+        if e.button() == Qt.LeftButton and self._drag_start is not None:
+            if self._press_on_x:
                 self.removeClicked.emit()
-            else:
-                self.clicked.emit()
+            self._drag_start = None
         e.accept()
 
 

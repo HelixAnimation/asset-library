@@ -73,24 +73,30 @@ QWidget {{
 /* Scrollbars */
 QScrollBar:vertical {{
     background: transparent;
-    width: 6px;
+    width: 8px;
     margin: 0;
 }}
 QScrollBar::handle:vertical {{
     background: {BORDER_MID};
-    border-radius: 3px;
+    border-radius: 4px;
     min-height: 20px;
+}}
+QScrollBar::handle:vertical:hover {{
+    background: {TEXT_SECONDARY};
 }}
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
     height: 0;
 }}
 QScrollBar:horizontal {{
     background: transparent;
-    height: 6px;
+    height: 8px;
 }}
 QScrollBar::handle:horizontal {{
     background: {BORDER_MID};
-    border-radius: 3px;
+    border-radius: 4px;
+}}
+QScrollBar::handle:horizontal:hover {{
+    background: {TEXT_SECONDARY};
 }}
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
     width: 0;
