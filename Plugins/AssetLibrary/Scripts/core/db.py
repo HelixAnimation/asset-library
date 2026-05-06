@@ -79,6 +79,11 @@ _MIGRATION_V3 = """
 ALTER TABLE assets ADD COLUMN project TEXT;
 """
 
+# Migration to v4: adds omitted flag
+_MIGRATION_V4 = """
+ALTER TABLE assets ADD COLUMN omitted INTEGER NOT NULL DEFAULT 0;
+"""
+
 
 def _now():
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -144,6 +149,11 @@ class AssetDB:
             self.conn.execute("UPDATE schema_version SET version = 3")
             self.conn.commit()
 
+        if current < 4:
+            self.conn.executescript(_MIGRATION_V4)
+            self.conn.execute("UPDATE schema_version SET version = 4")
+            self.conn.commit()
+
     # ------------------------------------------------------------------
     # Assets
     # ------------------------------------------------------------------
@@ -204,6 +214,8 @@ class AssetDB:
             wheres.append("a.name LIKE ?")
             params.append("%" + search + "%")
 
+        wheres.append("a.omitted = 0")
+
         if wheres:
             query += " WHERE " + " AND ".join(wheres)
 
@@ -252,6 +264,20 @@ class AssetDB:
         params = list(data.values()) + [asset_id]
         self.conn.execute("UPDATE assets SET %s WHERE id = ?" % sets, params)
         self.conn.commit()
+
+    def omit_asset(self, asset_id):
+        self.conn.execute("UPDATE assets SET omitted = 1 WHERE id = ?", (asset_id,))
+        self.conn.commit()
+
+    def restore_asset(self, asset_id):
+        self.conn.execute("UPDATE assets SET omitted = 0 WHERE id = ?", (asset_id,))
+        self.conn.commit()
+
+    def get_omitted_assets(self):
+        rows = self.conn.execute(
+            "SELECT id, name, category, subcategory FROM assets WHERE omitted = 1 ORDER BY name"
+        ).fetchall()
+        return [dict(r) for r in rows]
 
     def delete_asset(self, asset_id):
         self.conn.execute("DELETE FROM assets WHERE id = ?", (asset_id,))

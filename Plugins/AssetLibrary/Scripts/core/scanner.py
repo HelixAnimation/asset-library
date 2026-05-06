@@ -162,13 +162,15 @@ class PrismScanner:
         category = info["category"] or self._infer_category_from_files(info["files"])
         dcc = self._infer_dcc(info["files"])
 
-        # Detect thumbs folder at asset level
-        asset_dir = info.get("asset_dir", "")
-        thumbs_dir = os.path.join(asset_dir, "thumbs") if asset_dir else ""
+        # Detect thumbs and textures folders inside the version folder
+        version_dir = info.get("version_dir", "")
+        thumbs_dir = os.path.join(version_dir, "thumbs") if version_dir else ""
         thumb_rel = self._rel(thumbs_dir) if thumbs_dir and os.path.isdir(thumbs_dir) else None
+        textures_dir = os.path.join(version_dir, "textures") if version_dir else ""
+        has_textures = 1 if textures_dir and os.path.isdir(textures_dir) else None
 
         if not rows:
-            asset_id = self.db.add_asset({
+            new_asset = {
                 "name":           info["name"],
                 "category":       category,
                 "subcategory":    info["subcategory"],
@@ -179,7 +181,10 @@ class PrismScanner:
                 "author":         info["author"],
                 "prism_path":     info["prism_path"],
                 "thumbnail_path": thumb_rel,
-            })
+            }
+            if has_textures:
+                new_asset["has_textures"] = has_textures
+            asset_id = self.db.add_asset(new_asset)
             added += 1
         else:
             asset_id = rows[0]["id"]
@@ -194,6 +199,8 @@ class PrismScanner:
                 })
             if thumb_rel:
                 update_data["thumbnail_path"] = thumb_rel
+            if has_textures:
+                update_data["has_textures"] = has_textures
             if update_data:
                 self.db.update_asset(asset_id, update_data)
                 updated += 1

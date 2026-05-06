@@ -198,7 +198,7 @@ A finalized HTML mockup (`index.html`) exists and should be used as the visual s
 
 ### Phase 2 — Data layer ✅
 3. ✅ **DB read/write layer** (`core/db.py`) — full CRUD, batch queries for tags/versions/filetypes/favorites
-4. ⬜ **Asset discovery** — NAS scan to populate `library.db` on first run and keep in sync
+4. ✅ **Asset discovery** (`core/scanner.py`) — NAS scan, version walking, category/DCC inference, stale cleanup
 
 ### Phase 3 — UI panel ✅
 5. ✅ **Main Qt panel** (`ui/library_browser.py`) — sidebar + grid + inspector split layout
@@ -210,17 +210,21 @@ A finalized HTML mockup (`index.html`) exists and should be used as the visual s
 11. ✅ **Inspector panel** (`ui/inspector.py`) — fullscreen preview, zoom/pan, asset metadata, version dropdown, ⋮ menu
 12. ✅ **Import dialog** (`ui/publish_dialog.py`) — source, name, version, category + subcategory, file type, renderer, DCC, includes, tags
 
-### Phase 4 — DCC integration ⬜
-13. ⬜ **Drag and drop** — drag card into Houdini or Maya viewport via `core/dcc_bridge.py`
-14. ⬜ **View USD** — launch usdview (or Houdini/Maya USD viewer)
-15. ⬜ **View USD via Prism** — open through Prism's version browser
-16. ⬜ **Houdini bridge** — Python API calls for import, reference, usdview
-17. ⬜ **Maya bridge** — `maya.cmds` equivalent
+### Phase 4 — Asset ingestion ✅
+13. ✅ **Import pipeline** (`core/importer.py`) — validate, copy to NAS, write DB, placeholder thumbnail, ImportThread
+14. ✅ **Thumbnail generation** — manual browse in publish dialog + auto placeholder (colored + first letter)
+15. ✅ **Edit asset** — pre-fill import dialog from DB, update metadata, right-click → Edit asset…
 
-### Phase 5 — Asset ingestion ⬜
-18. ⬜ **Import pipeline** — validate, copy to NAS, write DB, trigger thumbnail generation
-19. ⬜ **Thumbnail generation** — strategy TBD: headless Houdini/RS or manual screenshot
-20. ⬜ **Edit asset** — pre-fill import dialog from existing DB record
+### Phase 5 — 3D view ⬜
+16. ⬜ **3D asset preview** — inline 3D viewer for asset cards (rotate, zoom, pan)
+17. ⬜ **3D view toggle** — switch between 2D thumbnail and 3D preview on cards
+
+### Phase 6 — DCC integration ⬜
+18. ⬜ **Drag and drop** — drag card into Houdini or Maya viewport via `core/dcc_bridge.py`
+19. ⬜ **View USD** — launch usdview (or Houdini/Maya USD viewer)
+20. ⬜ **View USD via Prism** — open through Prism's version browser
+21. ⬜ **Houdini bridge** — Python API calls for import, reference, usdview
+22. ⬜ **Maya bridge** — `maya.cmds` equivalent
 
 ---
 

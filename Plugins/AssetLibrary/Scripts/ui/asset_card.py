@@ -16,6 +16,7 @@ from ui.styles import (
 DEFAULT_CARD_WIDTH = 118
 
 _CARD_RADIUS = 6
+_THUMB_BG = "#1a1a1a"
 
 
 def _asset_palette_index(asset_data):
@@ -31,6 +32,8 @@ class AssetCard(QWidget):
     assetClicked    = Signal(dict)
     versionChanged  = Signal(int, str)
     filetypeChanged = Signal(int, str)
+    editRequested   = Signal(dict)
+    omitRequested   = Signal(dict)
 
     def __init__(self, asset_data, is_favorite=False, versions=None,
                  filetypes=None, parent=None):
@@ -50,6 +53,7 @@ class AssetCard(QWidget):
 
         self.setAttribute(Qt.WA_StyledBackground, False)
         self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.StrongFocus)
 
         self._build()
         # Overlay draws the border on top of all children (thumb would cover it otherwise)
@@ -232,9 +236,26 @@ class AssetCard(QWidget):
 
     def enterEvent(self, e):
         self._onHoverEnter()
+        self.setFocus(Qt.MouseFocusReason)
 
     def leaveEvent(self, e):
         self._onHoverLeave()
+        self.clearFocus()
+
+    def keyPressEvent(self, e):
+        key = e.key()
+        if key == Qt.Key_Left:
+            self._onArrowLeft()
+        elif key == Qt.Key_Right:
+            self._onArrowRight()
+        elif key in (Qt.Key_Up, Qt.Key_Down):
+            views = [v for v, _ in _VIEWS if self._view_thumbs.get(v)]
+            if views:
+                idx = views.index(self._current_view) if self._current_view in views else 0
+                idx = (idx - 1) % len(views) if key == Qt.Key_Up else (idx + 1) % len(views)
+                self._onViewDotClicked(views[idx])
+        else:
+            super().keyPressEvent(e)
 
     # ── Interaction ────────────────────────────────────────────────────
 
@@ -382,6 +403,7 @@ class AssetCard(QWidget):
         fav_label = "Remove from Favorites" if self._is_fav else "Add to Favorites"
         menu.addAction(fav_label).triggered.connect(self._onStarClicked)
         menu.addAction("Edit asset…").triggered.connect(self._onEditAsset)
+        menu.addAction("Omit asset…").triggered.connect(self._onOmitAsset)
 
         menu.exec_(e.globalPos())
 
@@ -421,9 +443,10 @@ class AssetCard(QWidget):
         pass
 
     def _onEditAsset(self):
-        from ui.publish_dialog import PublishDialog
-        dlg = PublishDialog(self.asset_data, parent=self)
-        dlg.exec_()
+        self.editRequested.emit(self.asset_data)
+
+    def _onOmitAsset(self):
+        self.omitRequested.emit(self.asset_data)
 
     def _menuStylesheet(self):
         return """
@@ -613,7 +636,7 @@ class _StarBtn(QWidget):
     def mousePressEvent(self, e):
         if e.button() == Qt.LeftButton:
             self.clicked.emit()
-        super().mousePressEvent(e)
+        e.accept()
 
 
 # ── View dot button ─────────────────────────────────────────────────────────
@@ -685,7 +708,7 @@ class _DotButton(QWidget):
     def mousePressEvent(self, e):
         if e.button() == Qt.LeftButton:
             self.clicked.emit()
-        super().mousePressEvent(e)
+        e.accept()
 
 
 # ── Arrow button (matches HTML .thumb-arrow-btn) ────────────────────────────
@@ -742,7 +765,7 @@ class _ArrowBtn(QWidget):
     def mousePressEvent(self, e):
         if e.button() == Qt.LeftButton:
             self.clicked.emit()
-        super().mousePressEvent(e)
+        e.accept()
 
 
 # ── Thumbnail widget ────────────────────────────────────────────────────────
@@ -775,11 +798,8 @@ class _ThumbWidget(QWidget):
         return QColor(bg)
 
     def _flattenPixmap(self, px):
-        # Some generated thumbnail PNGs have transparent/antialiased corners.
-        # Flatten before scaling so transparent edge pixels cannot resolve to
-        # black against Qt's native backing store.
         flat = QPixmap(px.size())
-        flat.fill(self._baseColor())
+        flat.fill(QColor(_THUMB_BG))
         painter = QPainter(flat)
         painter.setRenderHint(QPainter.SmoothPixmapTransform)
         painter.drawPixmap(0, 0, px)
@@ -832,9 +852,10 @@ class _ThumbWidget(QWidget):
             p.fillRect(self.rect(), QColor(bg))
             self._drawCubePlaceholder(p)
         elif self._orig_px and not self._orig_px.isNull():
+            p.fillRect(self.rect(), QColor(_THUMB_BG))
             scaled = self._orig_px.scaled(
                 self.width(), self.height(),
-                Qt.KeepAspectRatioByExpanding,
+                Qt.KeepAspectRatio,
                 Qt.SmoothTransformation,
             )
             x = (self.width()  - scaled.width())  // 2

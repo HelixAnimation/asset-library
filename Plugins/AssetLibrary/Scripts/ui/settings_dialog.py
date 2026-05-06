@@ -3,7 +3,7 @@ import os
 from qtpy.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QWidget, QFrame, QScrollArea, QSizePolicy,
-    QFileDialog, QProgressBar, QSpinBox,
+    QFileDialog, QProgressBar, QSpinBox, QMessageBox,
 )
 from qtpy.QtCore import Qt, Signal, QThread
 
@@ -72,8 +72,7 @@ class SettingsDialog(QDialog):
 
         body_layout.addWidget(self._buildLibrarySection())
         body_layout.addWidget(self._buildDisplaySection())
-
-        # ── Add future sections here ──────────────────────────────────
+        body_layout.addWidget(self._buildOmittedSection())
 
         body_layout.addStretch()
         scroll.setWidget(body)
@@ -163,12 +162,130 @@ class SettingsDialog(QDialog):
 
         return section
 
+    def _buildOmittedSection(self):
+        self._omitted_section = _Section("OMITTED ASSETS")
+
+        self._omitted_list = QWidget()
+        self._omitted_list.setStyleSheet("background: transparent;")
+        self._omitted_list_layout = QVBoxLayout(self._omitted_list)
+        self._omitted_list_layout.setContentsMargins(0, 0, 0, 0)
+        self._omitted_list_layout.setSpacing(4)
+
+        self._omitted_section.addWidget(self._omitted_list)
+        return self._omitted_section
+
+    def _populateOmitted(self):
+        layout = self._omitted_list_layout
+        while layout.count():
+            item = layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        assets = []
+        db = self._getDB()
+        if db:
+            try:
+                assets = db.get_omitted_assets()
+            finally:
+                db.close()
+
+        if not assets:
+            empty = QLabel("No omitted assets.")
+            empty.setStyleSheet(
+                "font-size: 11px; color: %s; background: transparent;"
+                " font-family: 'IBM Plex Mono', monospace;" % TEXT_TERTIARY
+            )
+            layout.addWidget(empty)
+            return
+
+        for asset in assets:
+            row = QWidget()
+            row.setStyleSheet("background: transparent;")
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(8)
+
+            cat = asset.get("subcategory") or asset.get("category", "")
+            name_lbl = QLabel(asset["name"])
+            name_lbl.setStyleSheet("font-size: 11px; color: %s; background: transparent;" % TEXT_PRIMARY)
+            cat_lbl = QLabel(cat)
+            cat_lbl.setStyleSheet(
+                "font-size: 10px; color: %s; background: transparent;"
+                " font-family: 'IBM Plex Mono', monospace;" % TEXT_TERTIARY
+            )
+
+            restore_btn = QPushButton("Restore")
+            restore_btn.setFixedHeight(24)
+            restore_btn.setStyleSheet(
+                "QPushButton { background: transparent; border: 1px solid %s;"
+                " border-radius: 4px; padding: 2px 8px; color: %s; font-size: 10px; }"
+                "QPushButton:hover { border-color: %s; color: %s; }" % (
+                    BORDER_LIGHT, TEXT_SECONDARY, BORDER_MID, TEXT_PRIMARY
+                )
+            )
+            delete_btn = QPushButton("Delete")
+            delete_btn.setFixedHeight(24)
+            delete_btn.setStyleSheet(
+                "QPushButton { background: transparent; border: 1px solid #5a2020;"
+                " border-radius: 4px; padding: 2px 8px; color: #c06060; font-size: 10px; }"
+                "QPushButton:hover { border-color: #8b3030; color: #e08080; }"
+            )
+
+            asset_id = asset["id"]
+            restore_btn.clicked.connect(lambda _, aid=asset_id: self._onRestoreAsset(aid))
+            delete_btn.clicked.connect(lambda _, aid=asset_id, n=asset["name"]: self._onDeleteAsset(aid, n))
+
+            row_layout.addWidget(name_lbl, 1)
+            row_layout.addWidget(cat_lbl)
+            row_layout.addWidget(restore_btn)
+            row_layout.addWidget(delete_btn)
+            layout.addWidget(row)
+
+    def _getDB(self):
+        if self.plugin:
+            return self.plugin.getDB()
+        return None
+
+    def _onRestoreAsset(self, asset_id):
+        db = self._getDB()
+        if not db:
+            return
+        try:
+            db.restore_asset(asset_id)
+        finally:
+            db.close()
+        self._populateOmitted()
+        self.saved.emit()
+
+    def _onDeleteAsset(self, asset_id, name):
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Delete permanently")
+        msg.setText("Permanently delete <b>%s</b>?" % name)
+        msg.setInformativeText("This cannot be undone. Files on disk will not be affected.")
+        msg.setIcon(QMessageBox.Warning)
+        msg.setStandardButtons(QMessageBox.Cancel)
+        del_btn = msg.addButton("Delete", QMessageBox.DestructiveRole)
+        msg.setDefaultButton(QMessageBox.Cancel)
+        msg.exec_()
+        if msg.clickedButton() is not del_btn:
+            return
+        db = self._getDB()
+        if not db:
+            return
+        try:
+            db.delete_asset(asset_id)
+        finally:
+            db.close()
+        self._populateOmitted()
+        self.saved.emit()
+
     # ------------------------------------------------------------------
 
     def _populate(self):
         if self.plugin:
             current = self.plugin._getAssetLibRoot() or ""
             self.path_edit.setText(current)
+        self._populateOmitted()
 
     def _onBrowse(self):
         current = self.path_edit.text().strip()

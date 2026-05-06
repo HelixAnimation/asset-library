@@ -6,7 +6,7 @@ from qtpy.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QLineEdit, QComboBox, QScrollArea,
     QFrame, QSizePolicy, QApplication, QCheckBox,
-    QGridLayout, QGraphicsDropShadowEffect,
+    QGridLayout, QGraphicsDropShadowEffect, QMessageBox,
 )
 from qtpy.QtCore import Qt, QTimer, Signal, QSize, QEvent
 from qtpy.QtGui import QFont, QIcon, QColor
@@ -23,6 +23,7 @@ from ui.asset_card import AssetCard
 from ui.publish_dialog import PublishDialog
 from ui.settings_dialog import SettingsDialog
 from ui.inspector import InspectorPanel
+from ui.tag_dropdown import TagDropdown as _TagDropdown
 
 logger = logging.getLogger(__name__)
 
@@ -164,10 +165,10 @@ class LibraryBrowser(QMainWindow):
         layout.addWidget(settings_btn)
 
         # Import button
-        import_btn = QPushButton("＋  Import")
-        import_btn.setObjectName("importBtn")
-        import_btn.clicked.connect(self._onImportClicked)
-        layout.addWidget(import_btn)
+        self.import_btn = QPushButton("＋  Import")
+        self.import_btn.setObjectName("importBtn")
+        self.import_btn.clicked.connect(self._onImportClicked)
+        layout.addWidget(self.import_btn)
 
         return bar
 
@@ -291,6 +292,8 @@ class LibraryBrowser(QMainWindow):
             card.starToggled.connect(self._onStarToggled)
             card.assetImport.connect(self._onAssetImport)
             card.assetClicked.connect(self._onCardClicked)
+            card.editRequested.connect(self._onEditAsset)
+            card.omitRequested.connect(self._onOmitAsset)
             self._all_cards.append(card)
 
         names = [c.asset_data.get("name", "") for c in self._all_cards]
@@ -540,26 +543,197 @@ class LibraryBrowser(QMainWindow):
         self.flow.setCardWidth(w)
 
     def _onImportClicked(self):
-        dlg = PublishDialog(parent=self)
+        db_tags, db_projects = [], []
+        db = self._getDB()
+        if db:
+            try:
+                db_tags = db.get_all_tags()
+                rows = db.conn.execute(
+                    "SELECT DISTINCT project FROM assets"
+                    " WHERE project IS NOT NULL AND project != '' ORDER BY project"
+                ).fetchall()
+                db_projects = [r[0] for r in rows]
+            finally:
+                db.close()
+        dlg = PublishDialog(
+            plugin=self.plugin,
+            db_tags=db_tags,
+            db_projects=db_projects,
+            disk_projects=self._getDiskProjects(),
+            active_project=self._getActivePrismProject(),
+            parent=self,
+        )
         dlg.assetSubmitted.connect(self._onAssetSubmitted)
         dlg.exec_()
 
+    def _getActivePrismProject(self):
+        try:
+            return self.plugin.core.getConfig("project", "name") or ""
+        except Exception:
+            return ""
+
+    def _getDiskProjects(self):
+        import json
+        scan_path = "X:\\"
+        if self.plugin:
+            try:
+                p = self.plugin.core.getConfig("globals", "localProjectRootPath") or ""
+                if p and os.path.isdir(p):
+                    scan_path = p
+            except Exception:
+                pass
+        if not os.path.isdir(scan_path):
+            return []
+        try:
+            folders = sorted([
+                f for f in os.listdir(scan_path)
+                if os.path.isdir(os.path.join(scan_path, f)) and not f.startswith(".")
+            ])
+        except Exception:
+            return []
+        result = []
+        for folder in folders:
+            pipeline_json = os.path.join(scan_path, folder, "00_Pipeline", "pipeline.json")
+            if not os.path.isfile(pipeline_json):
+                continue
+            name = folder
+            try:
+                with open(pipeline_json, "r", encoding="utf-8") as jf:
+                    data = json.load(jf)
+                for key in ("project_name", "projectName", "name"):
+                    val = data.get(key) or (data.get("globals") or {}).get(key)
+                    if val:
+                        name = str(val)
+                        break
+            except Exception:
+                pass
+            result.append(name)
+        return result
+
     def _onAssetSubmitted(self, data):
+        if not self.plugin:
+            return
+        library_root = self.plugin._getAssetLibRoot()
+        if not library_root:
+            QMessageBox.warning(self, "Import", "Library root is not configured.")
+            return
+
+        db = self._getDB()
+        if db is None:
+            return
+        db_path = db.db_path
+        db.close()
+
+        self.import_btn.setEnabled(False)
+        self.status_label.setText("Importing…")
+
+        from core.importer import ImportThread
+        thumbnails = data.pop("_thumbnails", {})
+        texture_files = data.pop("_texture_files", [])
+        self._import_thread = ImportThread(library_root, db_path, data, thumbnails, texture_files)
+        self._import_thread.finished.connect(self._onImportFinished)
+        self._import_thread.start()
+
+    def _onImportFinished(self, result):
+        self.import_btn.setEnabled(True)
+        if result["success"]:
+            self.status_label.setText("Imported successfully")
+            self.refreshAssets()
+        else:
+            self.status_label.setText("Import failed")
+            QMessageBox.warning(
+                self, "Import Failed",
+                result.get("error", "Unknown error"),
+            )
+
+    # ------------------------------------------------------------------
+    # Edit asset
+    # ------------------------------------------------------------------
+
+    def _onEditAsset(self, asset_data):
+        asset_id = asset_data.get("id")
+        if not asset_id:
+            return
         db = self._getDB()
         if db is None:
             return
         try:
-            asset_id = db.add_asset(data)
-            db.upsert_version(
-                asset_id,
-                data.get("version", "v001"),
-                data.get("filepath", ""),
-                data.get("filetype", ""),
-            )
-            if data.get("tags"):
-                db.set_asset_tags(asset_id, data["tags"])
+            full = db.get_asset(asset_id)
+            if not full:
+                return
+            tags = db.get_asset_tags(asset_id)
+            db_tags = db.get_all_tags()
+            rows = db.conn.execute(
+                "SELECT DISTINCT project FROM assets"
+                " WHERE project IS NOT NULL AND project != '' ORDER BY project"
+            ).fetchall()
+            db_projects = [r[0] for r in rows]
         finally:
             db.close()
+
+        prefill = dict(full)
+        prefill["tags"] = tags
+        prefill["_edit_id"] = asset_id
+        dlg = PublishDialog(
+            prefill=prefill,
+            plugin=self.plugin,
+            db_tags=db_tags,
+            db_projects=db_projects,
+            disk_projects=self._getDiskProjects(),
+            active_project=self._getActivePrismProject(),
+            parent=self,
+        )
+        dlg.assetSubmitted.connect(self._onAssetEdited)
+        dlg.exec_()
+
+    def _onAssetEdited(self, data):
+        asset_id = data.pop("_edit_id", None)
+        if not asset_id:
+            return
+        db = self._getDB()
+        if db is None:
+            return
+        tags = data.pop("tags", None)
+        data.pop("_thumbnails", None)
+        data.pop("filepaths", None)
+        try:
+            db.update_asset(asset_id, data)
+            if tags:
+                db.set_asset_tags(asset_id, tags)
+        finally:
+            db.close()
+        self.refreshAssets()
+
+    def _onOmitAsset(self, asset_data):
+        asset_id = asset_data.get("id")
+        name = asset_data.get("name", "this asset")
+        if not asset_id:
+            return
+
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Omit asset")
+        msg.setText("Omit <b>%s</b> from the library?" % name)
+        msg.setInformativeText("The asset will be hidden from the library. Files on disk will not be affected. You can restore it later by clearing the omitted flag in the database.")
+        msg.setIcon(QMessageBox.Warning)
+        msg.setStandardButtons(QMessageBox.Cancel)
+        omit_btn = msg.addButton("Omit", QMessageBox.DestructiveRole)
+        msg.setDefaultButton(QMessageBox.Cancel)
+        msg.exec_()
+
+        if msg.clickedButton() is not omit_btn:
+            return
+
+        db = self._getDB()
+        if db is None:
+            return
+        try:
+            db.omit_asset(asset_id)
+        finally:
+            db.close()
+
+        if self._selected_card and self._selected_card.asset_data.get("id") == asset_id:
+            self._hideInspector()
+            self._selected_card = None
         self.refreshAssets()
 
     # ------------------------------------------------------------------
@@ -949,131 +1123,6 @@ class _TagPill(QWidget):
         self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
 
 
-class _TagDropdown(QFrame):
-    """Autocomplete popup showing matching tags and asset names."""
-
-    tagSelected  = Signal(str)
-    nameSelected = Signal(str)
-
-    _BTN_H = 28
-
-    def __init__(self, parent=None):
-        super().__init__(parent, Qt.Tool | Qt.FramelessWindowHint)
-        self.setAttribute(Qt.WA_ShowWithoutActivating)   # never steal focus from _edit
-        self.setObjectName("tagDropdown")
-        self.setStyleSheet(
-            "#tagDropdown {"
-            "  background: %s; border: 1px solid %s; border-radius: 6px;"
-            "  padding: 4px 0;"
-            "}" % (BG_PRIMARY, BORDER_MID)
-        )
-        self._layout = QVBoxLayout(self)
-        self._layout.setContentsMargins(0, 4, 0, 4)
-        self._layout.setSpacing(0)
-        self._btns = []   # (signal, arg, btn) — interactive items only
-        self._sel  = -1   # currently highlighted index
-
-    def _clear(self):
-        while self._layout.count():
-            item = self._layout.takeAt(0)
-            w = item.widget()
-            if w:
-                w.deleteLater()
-        self._btns = []
-        self._sel  = -1
-
-    def _addHeader(self, text):
-        lbl = QLabel(text)
-        lbl.setStyleSheet(
-            "color: %s; font-size: 10px; font-family: 'IBM Plex Mono', monospace;"
-            " letter-spacing: 1px; padding: 4px 12px 2px; background: transparent;"
-            % TEXT_TERTIARY
-        )
-        self._layout.addWidget(lbl)
-
-    def _addBtn(self, label, signal, arg, icon_prefix=""):
-        btn = QPushButton(icon_prefix + label)
-        btn.setCursor(Qt.PointingHandCursor)
-        btn.setFixedHeight(self._BTN_H)
-        self._applyBtnStyle(btn, selected=False)
-        btn.clicked.connect(lambda _, a=arg: signal.emit(a))
-        self._layout.addWidget(btn)
-        self._btns.append((signal, arg, btn))
-
-    def _applyBtnStyle(self, btn, selected):
-        if selected:
-            btn.setStyleSheet(
-                "QPushButton {"
-                "  background: %s; border: none; color: %s;"
-                "  font-size: 12px; font-family: 'IBM Plex Sans', sans-serif;"
-                "  padding: 0 12px; text-align: left;"
-                "}" % (BG_SECONDARY, TEXT_PRIMARY)
-            )
-        else:
-            btn.setStyleSheet(
-                "QPushButton {"
-                "  background: transparent; border: none; color: %s;"
-                "  font-size: 12px; font-family: 'IBM Plex Sans', sans-serif;"
-                "  padding: 0 12px; text-align: left;"
-                "}"
-                "QPushButton:hover { background: %s; color: %s; }"
-                % (TEXT_SECONDARY, BG_SECONDARY, TEXT_PRIMARY)
-            )
-
-    def selectNext(self):
-        if not self._btns:
-            return
-        new = min(self._sel + 1, len(self._btns) - 1)
-        self._highlight(new)
-
-    def selectPrev(self):
-        if not self._btns:
-            return
-        new = max(self._sel - 1, -1)
-        self._highlight(new)
-
-    def _highlight(self, idx):
-        if self._sel >= 0 and self._sel < len(self._btns):
-            self._applyBtnStyle(self._btns[self._sel][2], selected=False)
-        self._sel = idx
-        if self._sel >= 0 and self._sel < len(self._btns):
-            self._applyBtnStyle(self._btns[self._sel][2], selected=True)
-
-    def activateSelected(self):
-        """Fire the signal for the highlighted item. Returns True if something was activated."""
-        if 0 <= self._sel < len(self._btns):
-            signal, arg, _ = self._btns[self._sel]
-            signal.emit(arg)
-            return True
-        return False
-
-    def setItems(self, tags, asset_names):
-        self._clear()
-        row_count = 0
-
-        if tags:
-            self._addHeader("TAGS")
-            row_count += 1
-            for t in tags:
-                self._addBtn(t, self.tagSelected, t, "# ")
-                row_count += 1
-
-        if asset_names:
-            if tags:
-                sep = QFrame()
-                sep.setFrameShape(QFrame.HLine)
-                sep.setFixedHeight(1)
-                sep.setStyleSheet("background: %s; border: none; margin: 4px 12px;" % BORDER_LIGHT)
-                self._layout.addWidget(sep)
-                row_count += 1
-            self._addHeader("ASSETS")
-            row_count += 1
-            for n in asset_names:
-                self._addBtn(n, self.nameSelected, n)
-                row_count += 1
-
-        self.setFixedWidth(260)
-        self.setFixedHeight(min(row_count * self._BTN_H + 16, 300))
 
 
 # ─────────────────────────────────────────────────────────────────────────────

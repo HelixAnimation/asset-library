@@ -281,6 +281,7 @@ class InspectorPreview(QWidget):
         self._view_mode = "2d"
         self.setAttribute(Qt.WA_StyledBackground, False)
         self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.StrongFocus)
         self._build()
 
     def _build(self):
@@ -521,6 +522,7 @@ class InspectorPreview(QWidget):
             self.fs_btn.raise_()
         self.close_btn.show()
         self.close_btn.raise_()
+        self.setFocus(Qt.MouseFocusReason)
 
     def leaveEvent(self, e):
         self._hover = False
@@ -532,6 +534,22 @@ class InspectorPreview(QWidget):
         self.fs_btn.hide()
         self.mode_btn.hide()
         self.close_btn.hide()
+        self.clearFocus()
+
+    def keyPressEvent(self, e):
+        key = e.key()
+        if key == Qt.Key_Left:
+            self._onLeft()
+        elif key == Qt.Key_Right:
+            self._onRight()
+        elif key in (Qt.Key_Up, Qt.Key_Down):
+            views = [v for v, _ in _VIEWS if self._view_thumbs.get(v)]
+            if views:
+                idx = views.index(self._current_view) if self._current_view in views else 0
+                idx = (idx - 1) % len(views) if key == Qt.Key_Up else (idx + 1) % len(views)
+                self._onDot(views[idx])
+        else:
+            super().keyPressEvent(e)
 
     def paintEvent(self, _e):
         p = QPainter(self)
@@ -546,9 +564,10 @@ class InspectorPreview(QWidget):
             p.fillRect(self.rect(), QColor(bg))
             self._drawCubePlaceholder(p)
         elif self._orig_px and not self._orig_px.isNull():
+            p.fillRect(self.rect(), QColor("#1a1a1a"))
             scaled = self._orig_px.scaled(
                 int(r.width()), int(r.height()),
-                Qt.KeepAspectRatioByExpanding,
+                Qt.KeepAspectRatio,
                 Qt.SmoothTransformation,
             )
             x = (int(r.width()) - scaled.width()) // 2
@@ -1037,12 +1056,19 @@ class FullscreenPreviewDialog(QDialog):
             self.update()
 
     def keyPressEvent(self, e):
-        if e.key() == Qt.Key_Escape:
+        key = e.key()
+        if key == Qt.Key_Escape:
             self.close()
-        elif e.key() == Qt.Key_Left:
+        elif key == Qt.Key_Left:
             self._onLeft()
-        elif e.key() == Qt.Key_Right:
+        elif key == Qt.Key_Right:
             self._onRight()
+        elif key in (Qt.Key_Up, Qt.Key_Down):
+            views = [v for v, _ in _VIEWS if self._view_thumbs.get(v)]
+            if views:
+                idx = views.index(self._current_view) if self._current_view in views else 0
+                idx = (idx - 1) % len(views) if key == Qt.Key_Up else (idx + 1) % len(views)
+                self._onDot(views[idx])
 
 
 class _MetadataSection(QWidget):
