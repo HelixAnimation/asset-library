@@ -1,5 +1,6 @@
 import os
 import math
+import shutil
 import logging
 
 from qtpy.QtWidgets import (
@@ -21,6 +22,7 @@ from ui.styles import (
 from ui.sidebar import SidebarWidget
 from ui.asset_card import AssetCard
 from ui.publish_dialog import PublishDialog
+from ui.version_dialog import VersionEditDialog
 from ui.settings_dialog import SettingsDialog
 from ui.inspector import InspectorPanel
 from ui.tag_dropdown import TagDropdown as _TagDropdown
@@ -117,6 +119,12 @@ class LibraryBrowser(QMainWindow):
         self.inspector.setFixedWidth(340)
         self.inspector.closeRequested.connect(self._hideInspector)
         self.inspector.tagClicked.connect(self._onTagAdded)
+        self.inspector.editInfoRequested.connect(self._onInspectorEditInfo)
+        self.inspector.addVersionRequested.connect(self._onInspectorAddVersion)
+        self.inspector.editVersionRequested.connect(self._onEditVersion)
+        self.inspector.versionPicked.connect(self._onInspectorVersionPicked)
+        self.inspector.favToggleRequested.connect(self._onInspectorFavToggle)
+        self.inspector.omitRequested.connect(self._onInspectorOmit)
         self.inspector.hide()
 
         _shadow = QGraphicsDropShadowEffect(self.inspector)
@@ -292,7 +300,10 @@ class LibraryBrowser(QMainWindow):
             card.starToggled.connect(self._onStarToggled)
             card.assetImport.connect(self._onAssetImport)
             card.assetClicked.connect(self._onCardClicked)
+            card.versionChanged.connect(self._onCardVersionChanged)
             card.editRequested.connect(self._onEditAsset)
+            card.editVersionRequested.connect(self._onEditVersion)
+            card.addVersionRequested.connect(self._onAddVersion)
             card.omitRequested.connect(self._onOmitAsset)
             self._all_cards.append(card)
 
@@ -494,6 +505,8 @@ class LibraryBrowser(QMainWindow):
             # Opening a hidden splitter child and resizing the Prism-hosted
             # window during mousePressEvent can crash some Qt hosts. Defer it.
             self._pending_inspector_asset = dict(asset_data or {})
+            if self._selected_card:
+                self._pending_inspector_asset["_is_fav"] = self._selected_card._is_fav
             self._pending_inspector_versions = list(self._selected_card._versions) if self._selected_card else []
             QTimer.singleShot(0, self._openPendingInspector)
         except Exception:
@@ -519,6 +532,36 @@ class LibraryBrowser(QMainWindow):
                 asset_data.get("id"),
                 asset_data.get("name"),
             )
+
+    def _onCardVersionChanged(self, asset_id, version):
+        """Sync the inspector's version combo when a card's version changes."""
+        if (self.inspector.isVisible()
+                and self._selected_card
+                and self._selected_card.asset_data.get("id") == asset_id):
+            self.inspector.setVersion(version)
+
+    def _onInspectorVersionPicked(self, version):
+        if self._selected_card:
+            self._selected_card._onVersionPicked(version)
+        self.inspector.setVersion(version)
+
+    def _onInspectorFavToggle(self):
+        if not self._selected_card:
+            return
+        self._selected_card._onStarClicked()
+        self.inspector.setFav(self._selected_card._is_fav)
+
+    def _onInspectorEditInfo(self):
+        if self._selected_card:
+            self._onEditAsset(self._selected_card.asset_data)
+
+    def _onInspectorAddVersion(self):
+        if self._selected_card:
+            self._onAddVersion(self._selected_card.asset_data)
+
+    def _onInspectorOmit(self):
+        if self._selected_card:
+            self._onOmitAsset(self._selected_card.asset_data)
 
     def _hideInspector(self):
         self.inspector.hide()
@@ -694,15 +737,257 @@ class LibraryBrowser(QMainWindow):
         if db is None:
             return
         tags = data.pop("tags", None)
-        data.pop("_thumbnails", None)
-        data.pop("filepaths", None)
+
         try:
+            current = db.get_asset(asset_id)
+            if not current:
+                return
+
+            old_name = current.get("name", "")
+            old_cat  = current.get("category", "")
+            old_sub  = current.get("subcategory") or ""
+            new_name = data.get("name", old_name)
+            new_cat  = data.get("category", old_cat)
+            new_sub  = data.get("subcategory") or ""
+
+            lib_root = self.plugin._getAssetLibRoot() if self.plugin else ""
+
+            if lib_root and (new_name != old_name or new_cat != old_cat or new_sub != old_sub):
+                old_parts  = [old_cat] + ([old_sub] if old_sub else []) + [old_name]
+                new_parts  = [new_cat] + ([new_sub] if new_sub else []) + [new_name]
+                old_folder = os.path.join(lib_root, *old_parts)
+                new_folder = os.path.join(lib_root, *new_parts)
+                old_prism  = "/".join(old_parts)
+                new_prism  = "/".join(new_parts)
+
+                if old_folder != new_folder and os.path.isdir(old_folder):
+                    if os.path.exists(new_folder):
+                        QMessageBox.warning(
+                            self, "Rename Failed",
+                            "A folder already exists at:\n%s" % new_folder,
+                        )
+                        return
+                    os.makedirs(os.path.dirname(new_folder), exist_ok=True)
+                    shutil.move(old_folder, new_folder)
+
+                def _repath(p):
+                    if not p:
+                        return p
+                    fwd = p.replace("\\", "/")
+                    if fwd.startswith(old_prism + "/"):
+                        return new_prism + fwd[len(old_prism):]
+                    if fwd == old_prism:
+                        return new_prism
+                    return p
+
+                data["filepath"]       = _repath(current.get("filepath", ""))
+                data["thumbnail_path"] = _repath(current.get("thumbnail_path", ""))
+                data["prism_path"]     = new_prism
+
+                for v in db.get_versions(asset_id):
+                    db.conn.execute(
+                        "UPDATE versions SET filepath=?, prism_path=?, thumbnail_path=? WHERE id=?",
+                        (_repath(v.get("filepath", "")), new_prism,
+                         _repath(v.get("thumbnail_path", "")), v["id"]),
+                    )
+                db.conn.commit()
+
             db.update_asset(asset_id, data)
-            if tags:
+            if tags is not None:
                 db.set_asset_tags(asset_id, tags)
         finally:
             db.close()
         self.refreshAssets()
+
+    # ------------------------------------------------------------------
+    # Edit version
+    # ------------------------------------------------------------------
+
+    def _onEditVersion(self, version_data):
+        if not version_data or not version_data.get("id"):
+            return
+        lib_root = self.plugin._getAssetLibRoot() if self.plugin else ""
+        dlg = VersionEditDialog(version_data=version_data, lib_root=lib_root, parent=self)
+        dlg.versionSubmitted.connect(self._onVersionEdited)
+        dlg.exec_()
+
+    def _onVersionEdited(self, data):
+        version_id = data.pop("version_id", None)
+        version_dir = data.pop("_version_dir", "")
+        if not version_id:
+            return
+
+        # File operations
+        if version_dir and os.path.isdir(version_dir):
+            self._applyFileOps(version_dir, data)
+
+        db = self._getDB()
+        if db is None:
+            return
+        try:
+            db.update_version(version_id, data)
+
+            # Update thumbnail_path if thumbs changed
+            current_thumbs = data.pop("_current_thumbs", None)
+            if current_thumbs is not None:
+                thumbs_rel_path = self._thumbsRelPath(version_dir, current_thumbs)
+                db.update_version(version_id, {"thumbnail_path": thumbs_rel_path})
+
+            # Update has_textures flag if textures changed
+            current_textures = data.pop("_current_textures", None)
+            if current_textures is not None:
+                has_tex = 1 if current_textures else 0
+                db.update_version(version_id, {"has_textures": has_tex})
+
+            # Sync version-level metadata to the parent asset
+            version = db.get_version_by_id(version_id)
+            if version:
+                thumbs = current_thumbs if current_thumbs is not None else []
+                thumbs_rel = self._thumbsRelPath(version_dir, thumbs) if version_dir else ""
+                db.conn.execute(
+                    "UPDATE assets SET renderer=?, dcc=?, has_rig=?, "
+                    "has_textures=?, has_materials=?, thumbnail_path=? "
+                    "WHERE id=?",
+                    (version.get("renderer", "Any"),
+                     version.get("dcc", "Universal"),
+                     int(version.get("has_rig", 0)),
+                     int(data.get("has_textures", version.get("has_textures", 0))),
+                     int(version.get("has_materials", 0)),
+                     thumbs_rel or "",
+                     version["asset_id"]),
+                )
+                db.conn.commit()
+        finally:
+            db.close()
+        self.refreshAssets()
+
+    def _applyFileOps(self, version_dir, data):
+        """Copy added files, delete removed files."""
+        # Files
+        for src in data.get("_files_to_add", []):
+            try:
+                shutil.copy2(src, os.path.join(version_dir, os.path.basename(src)))
+            except OSError:
+                pass
+        for name in data.get("_files_to_remove", []):
+            try:
+                os.remove(os.path.join(version_dir, name))
+            except OSError:
+                pass
+
+        # Thumbnails
+        thumbs_dir = os.path.join(version_dir, "thumbs")
+        if data.get("_thumbs_to_add"):
+            os.makedirs(thumbs_dir, exist_ok=True)
+        for src in data.get("_thumbs_to_add", []):
+            try:
+                shutil.copy2(src, os.path.join(thumbs_dir, os.path.basename(src)))
+            except OSError:
+                pass
+        for name in data.get("_thumbs_to_remove", []):
+            try:
+                os.remove(os.path.join(thumbs_dir, name))
+            except OSError:
+                pass
+        thumbs_by_view = data.get("_current_thumbs_by_view")
+        if thumbs_by_view:
+            self._applyThumbOrder(thumbs_dir, thumbs_by_view)
+
+        # Textures
+        textures_dir = os.path.join(version_dir, "textures")
+        if data.get("_textures_to_add"):
+            os.makedirs(textures_dir, exist_ok=True)
+        for src in data.get("_textures_to_add", []):
+            try:
+                shutil.copy2(src, os.path.join(textures_dir, os.path.basename(src)))
+            except OSError:
+                pass
+        for name in data.get("_textures_to_remove", []):
+            try:
+                os.remove(os.path.join(textures_dir, name))
+            except OSError:
+                pass
+
+    def _applyThumbOrder(self, thumbs_dir, thumbs_by_view):
+        """Rename thumb files to match drag-reorder. Uses two-pass rename to avoid conflicts."""
+        if not os.path.isdir(thumbs_dir):
+            return
+        for view, names in thumbs_by_view.items():
+            ordered = [n for n in names if os.path.isfile(os.path.join(thumbs_dir, n))]
+            if not ordered:
+                continue
+            # Pass 1: rename to temp names
+            temp_to_final = {}
+            for i, name in enumerate(ordered):
+                ext = os.path.splitext(name)[1]
+                final = "%s_%03d%s" % (view, i + 1, ext)
+                if name == final:
+                    continue
+                temp = "__tmp_%d_%s%s" % (i, view, ext)
+                try:
+                    os.rename(os.path.join(thumbs_dir, name), os.path.join(thumbs_dir, temp))
+                    temp_to_final[temp] = final
+                except OSError:
+                    pass
+            # Pass 2: rename temps to final names
+            for temp, final in temp_to_final.items():
+                try:
+                    os.rename(os.path.join(thumbs_dir, temp), os.path.join(thumbs_dir, final))
+                except OSError:
+                    pass
+
+    def _thumbsRelPath(self, version_dir, thumb_names):
+        """Return relative thumbs dir path from lib_root, or empty if no thumbs."""
+        if not thumb_names or not version_dir:
+            return ""
+        thumbs_dir = os.path.join(version_dir, "thumbs")
+        lib_root = self.plugin._getAssetLibRoot() if self.plugin else ""
+        if not lib_root:
+            return ""
+        try:
+            return os.path.relpath(thumbs_dir, lib_root).replace("\\", "/")
+        except ValueError:
+            return ""
+
+    # ------------------------------------------------------------------
+    # Add version — opens import dialog pre-filled with asset metadata
+    # ------------------------------------------------------------------
+
+    def _onAddVersion(self, asset_data):
+        asset_id = asset_data.get("id")
+        if not asset_id:
+            return
+        db = self._getDB()
+        if db is None:
+            return
+        try:
+            full = db.get_asset(asset_id)
+            if not full:
+                return
+            db_tags = db.get_all_tags()
+            rows = db.conn.execute(
+                "SELECT DISTINCT project FROM assets"
+                " WHERE project IS NOT NULL AND project != '' ORDER BY project"
+            ).fetchall()
+            db_projects = [r[0] for r in rows]
+        finally:
+            db.close()
+
+        # Pre-fill with asset metadata so the user only adds files
+        prefill = {k: v for k, v in full.items()
+                   if k in ("name", "category", "subcategory", "project")}
+        prefill["_add_version_asset_id"] = asset_id
+        dlg = PublishDialog(
+            prefill=prefill,
+            plugin=self.plugin,
+            db_tags=db_tags,
+            db_projects=db_projects,
+            disk_projects=self._getDiskProjects(),
+            active_project=self._getActivePrismProject(),
+            parent=self,
+        )
+        dlg.assetSubmitted.connect(self._onAssetSubmitted)
+        dlg.exec_()
 
     def _onOmitAsset(self, asset_data):
         asset_id = asset_data.get("id")

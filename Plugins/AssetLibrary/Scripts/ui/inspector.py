@@ -4,10 +4,10 @@ import logging
 from qtpy.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QScrollArea, QFrame, QSizePolicy, QDialog,
-    QGraphicsDropShadowEffect, QComboBox, QMenu,
+    QGraphicsDropShadowEffect, QMenu, QAction, QActionGroup,
 )
 from qtpy.QtCore import Qt, Signal, QRectF, QMimeData
-from qtpy.QtGui import QPixmap, QColor, QPainter, QPainterPath, QPen
+from qtpy.QtGui import QPixmap, QColor, QPainter, QPainterPath, QPen, QBitmap
 from qtpy.QtWidgets import QApplication
 
 from ui.styles import (
@@ -37,27 +37,28 @@ def _asset_palette_index(asset_data):
         return 0
 
 
-class _VersionCombo(QComboBox):
-    """QComboBox that styles the popup container frame directly so borders render on all sides."""
-    def showPopup(self):
-        super().showPopup()
-        self.view().scrollToTop()
-        container = self.view().parentWidget()
-        if container and container is not self:
-            container.setObjectName("_verPopup")
-            container.setStyleSheet(
-                "#_verPopup { border: 1px solid %s; border-radius: 4px;"
-                " background: %s; }"
-                "QAbstractItemView { border: none; background: %s; }"
-                "QScrollBar { width: 0; height: 0; border: none; }"
-                % (BORDER_MID, BG_PRIMARY, BG_PRIMARY)
-            )
+class _RoundedMenu(QMenu):
+    def showEvent(self, e):
+        super().showEvent(e)
+        bmp = QBitmap(self.size())
+        bmp.fill(Qt.color0)
+        p = QPainter(bmp)
+        p.setPen(Qt.NoPen)
+        p.setBrush(Qt.color1)
+        p.drawRoundedRect(bmp.rect(), 8, 8)
+        p.end()
+        self.setMask(bmp)
 
 
 class InspectorPanel(QWidget):
-    closeRequested = Signal()
-    tagClicked     = Signal(str)
-    versionChanged = Signal(str)   # emits the selected version string
+    closeRequested      = Signal()
+    tagClicked          = Signal(str)
+    editInfoRequested   = Signal()
+    addVersionRequested = Signal()
+    editVersionRequested = Signal(dict)
+    versionPicked       = Signal(str)
+    favToggleRequested  = Signal()
+    omitRequested       = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -65,6 +66,9 @@ class InspectorPanel(QWidget):
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setFixedWidth(340)
         self._asset_data = None
+        self._versions = []
+        self._selected_version = ""
+        self._is_fav = False
         self._build()
 
     def _build(self):
@@ -89,9 +93,9 @@ class InspectorPanel(QWidget):
         header_outer.setContentsMargins(14, 10, 14, 10)
         header_outer.setSpacing(2)
 
-        # Row: name (left) + version combo (right)
+        # Row: name (left) + star + more button (right)
         title_row = QHBoxLayout()
-        title_row.setSpacing(8)
+        title_row.setSpacing(6)
         self.name_label = QLabel("")
         self.name_label.setWordWrap(True)
         self.name_label.setStyleSheet(
@@ -100,38 +104,10 @@ class InspectorPanel(QWidget):
         )
         title_row.addWidget(self.name_label, 1)
 
-        self.version_combo = _VersionCombo()
-        self.version_combo.setFixedWidth(70)
-        self.version_combo.view().setFocusPolicy(Qt.NoFocus)
-        self.version_combo.view().setItemDelegate(_NoFocusDelegate(self.version_combo))
-        self.version_combo.setMaxVisibleItems(10)
-        self.version_combo.view().setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.version_combo.view().setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.version_combo.view().setAutoScroll(False)
-        self.version_combo.setStyleSheet(
-            "QComboBox { background: %s; border: 1px solid %s; border-radius: 4px;"
-            " padding: 2px 6px; color: %s; font-size: 11px;"
-            " font-family: 'IBM Plex Mono', monospace; min-width: 60px; outline: none; }"
-            "QComboBox:focus, QComboBox:on { border: 1px solid %s; }"
-            "QComboBox::drop-down { border: none; width: 16px; background: transparent; }"
-            "QComboBox::down-arrow { image: none; border-left: 3px solid transparent;"
-            " border-right: 3px solid transparent; border-top: 4px solid %s;"
-            " width: 0; height: 0; }"
-            "QComboBox QAbstractItemView { background: %s; border: none;"
-            " color: %s; selection-background-color: %s; selection-color: %s;"
-            " padding: 2px; outline: none; }"
-            "QComboBox QAbstractItemView::item { padding: 3px 6px; }"
-            "QComboBox QAbstractItemView::item:selected { background: %s; }"
-            % (BG_PRIMARY, BORDER_LIGHT, TEXT_SECONDARY,
-               BORDER_MID, TEXT_TERTIARY,
-               BG_PRIMARY, TEXT_PRIMARY, ACCENT_BG, ACCENT_TEXT,
-               ACCENT_BG)
-        )
-        self.version_combo.currentTextChanged.connect(
-            lambda v: self.versionChanged.emit(v) if v else None
-        )
-        self.version_combo.hide()
-        title_row.addWidget(self.version_combo)
+        self.star_btn = _StarBtn(header)
+        self.star_btn.clicked.connect(self.favToggleRequested.emit)
+        self.star_btn.hide()
+        title_row.addWidget(self.star_btn, 0, Qt.AlignVCenter)
 
         self.more_btn = QLabel("⋮")
         self.more_btn.setFixedSize(22, 22)
@@ -179,89 +155,172 @@ class InspectorPanel(QWidget):
 
     def setAsset(self, asset_data, versions=None):
         self._asset_data = asset_data
+        self._versions = versions or []
         self.preview.setAsset(asset_data)
         self.metadata.setAsset(asset_data)
 
         if asset_data:
-            name = _text(asset_data.get("name"))
-            self.name_label.setText(name)
+            self.name_label.setText(_text(asset_data.get("name")))
             cat = _text(asset_data.get("category"))
             sub = _text(asset_data.get("subcategory"))
-            cat_text = cat + (" / " + sub if sub else "")
-            self.category_label.setText(cat_text)
-
-            # Version combo
-            versions = versions or []
-            self.version_combo.blockSignals(True)
-            self.version_combo.clear()
-            if versions:
-                seen = set()
-                for v in versions:
-                    ver_str = v.get("version", "")
-                    if ver_str and ver_str not in seen:
-                        seen.add(ver_str)
-                        self.version_combo.addItem(ver_str)
-                # Select latest (first, since sorted DESC)
-                self.version_combo.setCurrentIndex(0)
-                self.version_combo.show()
+            self.category_label.setText(cat + (" / " + sub if sub else ""))
+            self._is_fav = bool(asset_data.get("_is_fav", False))
+            self.star_btn.setFav(self._is_fav)
+            self.star_btn.show()
+            if self._versions:
+                self._selected_version = self._versions[0].get("version", "")
                 self.more_btn.show()
             else:
-                self.version_combo.hide()
+                self._selected_version = ""
                 self.more_btn.hide()
-            self.version_combo.blockSignals(False)
         else:
             self.name_label.setText("")
             self.category_label.setText("")
-            self.version_combo.hide()
+            self._selected_version = ""
+            self._is_fav = False
+            self.star_btn.setFav(False)
+            self.star_btn.hide()
             self.more_btn.hide()
 
-    def _onMoreClicked(self, e):
-        if e.button() != Qt.LeftButton:
-            return
-        menu = QMenu(self)
-        menu.setStyleSheet(
-            "QMenu { background-color: #242424; border: 1px solid %s; border-radius: 6px;"
-            " padding: 4px 0; color: %s; font-size: 12px; outline: none; }"
-            "QMenu::item { padding: 5px 20px 5px 12px; background: transparent; outline: none; }"
-            "QMenu::item:selected { background-color: %s; color: %s; outline: none; }"
-            % (BORDER_MID, TEXT_SECONDARY, ACCENT_BG, ACCENT_TEXT)
-        )
-        act_explorer = menu.addAction("Open in Explorer")
-        act_copy = menu.addAction("Copy Link")
-        action = menu.exec_(self.more_btn.mapToGlobal(self.more_btn.rect().bottomLeft()))
-        if action == act_explorer:
-            self._openInExplorer()
-        elif action == act_copy:
-            self._copyLink()
+    def setFav(self, fav):
+        self._is_fav = fav
+        self.star_btn.setFav(fav)
 
-    def _getCurrentFilepath(self):
+    def setVersion(self, version):
+        self._selected_version = version
+        self._onVersionChanged(version)
+
+    def _onVersionChanged(self, version):
+        """Update preview and metadata when the user switches versions."""
+        # Find version-level data
+        for v in self._versions:
+            if v.get("version") == version:
+                # Rebuild asset_data with this version's thumbnail + metadata
+                ad = dict(self._asset_data or {})
+                tp = v.get("thumbnail_path", "") or ""
+                if tp:
+                    ad["thumbnail_path"] = tp
+                ad["renderer"] = v.get("renderer", "Any")
+                ad["dcc"] = v.get("dcc", "Universal")
+                ad["has_rig"] = v.get("has_rig", 0)
+                ad["has_textures"] = v.get("has_textures", 0)
+                ad["has_materials"] = v.get("has_materials", 0)
+                self.preview.setAsset(ad)
+                self.metadata.setAsset(ad)
+                return
+        # Fallback: no version data found, use asset_data as-is
+        self.preview.setAsset(self._asset_data)
+        self.metadata.setAsset(self._asset_data)
+
+    def _onMoreClicked(self, e):
+        if e.button() != Qt.LeftButton or not self._asset_data:
+            return
+        ss = self._menuStylesheet()
+        menu = _RoundedMenu(self)
+        menu.setStyleSheet(ss)
+
+        menu.addAction("Edit info…").triggered.connect(self.editInfoRequested.emit)
+        menu.addSeparator()
+
+        if self._versions:
+            ver_menu = _RoundedMenu("Version", menu)
+            ver_menu.setStyleSheet(ss)
+            ver_menu.addAction("Add version…").triggered.connect(
+                self.addVersionRequested.emit)
+            ver_menu.addAction("Edit version…").triggered.connect(
+                self._onEmitEditVersion)
+            ver_menu.addSeparator()
+            grp = QActionGroup(ver_menu)
+            grp.setExclusive(True)
+            seen = set()
+            for v in self._versions:
+                ver_str = v.get("version", "")
+                if ver_str in seen:
+                    continue
+                seen.add(ver_str)
+                checked = (ver_str == self._selected_version)
+                a = QAction(("● " if checked else "   ") + ver_str, ver_menu)
+                a.setCheckable(True)
+                a.setChecked(checked)
+                a.triggered.connect(lambda _, vs=ver_str: self.versionPicked.emit(vs))
+                grp.addAction(a)
+                ver_menu.addAction(a)
+            menu.addMenu(ver_menu)
+
+        menu.addSeparator()
+        menu.addAction("Open in Explorer").triggered.connect(self._openInExplorer)
+        menu.addAction("Copy path").triggered.connect(self._copyPath)
+        menu.addSeparator()
+
+        fav_label = "Remove from Favorites" if self._is_fav else "Add to Favorites"
+        menu.addAction(fav_label).triggered.connect(self.favToggleRequested.emit)
+        menu.addAction("Omit asset…").triggered.connect(self.omitRequested.emit)
+
+        menu.exec_(self.more_btn.mapToGlobal(self.more_btn.rect().bottomLeft()))
+
+    def _onEmitEditVersion(self):
+        for v in self._versions:
+            if v.get("version") == self._selected_version:
+                self.editVersionRequested.emit(v)
+                return
+        if self._versions:
+            self.editVersionRequested.emit(self._versions[0])
+
+    def _getVersionFilepath(self):
         if not self._asset_data:
-            return None
-        ver = self.version_combo.currentText()
-        filepath = self._asset_data.get("filepath", "")
+            return ""
         lib_root = self._asset_data.get("_lib_root", "")
-        if lib_root and not os.path.isabs(filepath):
+        filepath = ""
+        for v in self._versions:
+            if v.get("version") == self._selected_version:
+                filepath = v.get("filepath", "")
+                break
+        if not filepath:
+            filepath = self._asset_data.get("filepath", "")
+        if filepath and not os.path.isabs(filepath) and lib_root:
             filepath = os.path.join(lib_root, filepath)
         return filepath
 
     def _openInExplorer(self):
-        filepath = self._getCurrentFilepath()
-        if not filepath:
-            return
         import subprocess
-        folder = os.path.dirname(filepath)
+        filepath = self._getVersionFilepath()
+        folder = os.path.dirname(filepath) if filepath else ""
         if folder and os.path.isdir(folder):
-            subprocess.Popen('explorer /select,"%s"' % os.path.normpath(filepath))
-        elif os.path.isdir(filepath):
-            subprocess.Popen('explorer "%s"' % os.path.normpath(filepath))
+            subprocess.Popen(["explorer", os.path.normpath(folder)])
+        elif self._asset_data:
+            lib_root = self._asset_data.get("_lib_root", "")
+            if lib_root and os.path.isdir(lib_root):
+                subprocess.Popen(["explorer", os.path.normpath(lib_root)])
 
-    def _copyLink(self):
-        filepath = self._getCurrentFilepath()
-        if not filepath:
-            return
-        mime = QMimeData()
-        mime.setText(filepath)
-        QApplication.clipboard().setMimeData(mime)
+    def _copyPath(self):
+        filepath = self._getVersionFilepath()
+        if filepath:
+            QApplication.clipboard().setText(os.path.normpath(filepath))
+
+    def _menuStylesheet(self):
+        return """
+            QMenu {
+                background-color: %(bg)s; border: 1px solid %(bm)s;
+                border-radius: 8px; padding: 4px 0;
+                font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+                font-size: 12px; color: %(ts)s;
+            }
+            QMenu::item { padding: 5px 18px 5px 22px; background: transparent; }
+            QMenu::item:selected {
+                background-color: %(bg2)s; color: %(tp)s; border-radius: 4px;
+            }
+            QMenu::item:disabled {
+                color: %(tt)s; font-size: 10px;
+                font-family: "IBM Plex Mono", monospace;
+                letter-spacing: 1px; padding: 8px 18px 2px 12px;
+            }
+            QMenu::item:checked { color: %(accent)s; font-weight: 500; }
+            QMenu::indicator { width: 0; height: 0; }
+            QMenu::separator { height: 1px; background: %(bl)s; margin: 3px 8px; }
+        """ % {
+            "bg": BG_SECONDARY, "bg2": BG_TERTIARY, "bl": BORDER_LIGHT, "bm": BORDER_MID,
+            "tp": TEXT_PRIMARY, "ts": TEXT_TERTIARY, "tt": TEXT_TERTIARY, "accent": ACCENT,
+        }
 
 
 class InspectorPreview(QWidget):
@@ -588,6 +647,74 @@ class InspectorPreview(QWidget):
                 p.setPen(QColor(fg))
                 name = _text(self._asset_data.get("name"), "?") or "?"
                 p.drawText(r, Qt.AlignCenter, name[0].upper())
+
+
+class _StarBtn(QWidget):
+    """Star button for the inspector header — matches the asset card footer star."""
+    clicked = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(18, 18)
+        self._fav = False
+        self._hover = False
+        self.setAttribute(Qt.WA_NoSystemBackground)
+        self.setCursor(Qt.PointingHandCursor)
+
+    def setFav(self, fav):
+        self._fav = fav
+        self.update()
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        cx = self.width() / 2
+        cy = self.height() / 2
+        outer = min(self.width(), self.height()) * 0.41
+        inner = outer * 0.5
+        star = self._starPath(cx, cy, outer, inner)
+        if self._fav:
+            color = QColor(0xff, 0xe0, 0x60) if self._hover else QColor(0xf0, 0xc0, 0x30)
+            p.setPen(Qt.NoPen)
+            p.setBrush(color)
+            p.drawPath(star)
+        else:
+            color = QColor(0xf0, 0xc0, 0x30) if self._hover else QColor(200, 160, 0, 150)
+            p.setPen(QPen(color, 1.2))
+            p.setBrush(Qt.NoBrush)
+            p.drawPath(star)
+
+    @staticmethod
+    def _starPath(cx, cy, outer, inner):
+        import math
+        path = QPainterPath()
+        for i in range(5):
+            angle_o = math.radians(-90 + i * 72)
+            ox = cx + outer * math.cos(angle_o)
+            oy = cy + outer * math.sin(angle_o)
+            angle_i = math.radians(-90 + i * 72 + 36)
+            ix = cx + inner * math.cos(angle_i)
+            iy = cy + inner * math.sin(angle_i)
+            if i == 0:
+                path.moveTo(ox, oy)
+            else:
+                path.lineTo(ox, oy)
+            path.lineTo(ix, iy)
+        path.closeSubpath()
+        return path
+
+    def enterEvent(self, e):
+        self._hover = True
+        self.update()
+
+    def leaveEvent(self, e):
+        self._hover = False
+        self.update()
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            self.clicked.emit()
+        e.accept()
 
 
 class _InspArrowBtn(QWidget):

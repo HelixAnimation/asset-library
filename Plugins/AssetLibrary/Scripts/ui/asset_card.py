@@ -1,7 +1,7 @@
 import os
 
 from qtpy.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QMenu, QAction, QActionGroup, QSizePolicy,
 )
 from qtpy.QtCore import Qt, Signal, QRectF
@@ -32,8 +32,10 @@ class AssetCard(QWidget):
     assetClicked    = Signal(dict)
     versionChanged  = Signal(int, str)
     filetypeChanged = Signal(int, str)
-    editRequested   = Signal(dict)
-    omitRequested   = Signal(dict)
+    editRequested        = Signal(dict)
+    editVersionRequested = Signal(dict)   # emits version dict for metadata editing
+    addVersionRequested  = Signal(dict)   # emits asset_data for new version import
+    omitRequested        = Signal(dict)
 
     def __init__(self, asset_data, is_favorite=False, versions=None,
                  filetypes=None, parent=None):
@@ -101,14 +103,6 @@ class AssetCard(QWidget):
         # Parenting to self keeps the controls independent from the clipped
         # thumbnail painter and avoids native child-window quirks in Prism.
 
-        # Star — top-left
-        self.star_btn = _StarBtn(self)
-        self.star_btn.setCursor(Qt.PointingHandCursor)
-        self.star_btn.clicked.connect(self._onStarClicked)
-        self.star_btn.setFav(self._is_fav)
-        if not self._is_fav:
-            self.star_btn.hide()
-
         # Arrows — circle buttons matching HTML .thumb-arrow-btn
         self.arrow_left  = _ArrowBtn(self)
         self.arrow_right = _ArrowBtn(self, mirror=True)
@@ -137,25 +131,39 @@ class AssetCard(QWidget):
         # ── Info row ──────────────────────────────────────────────────
         info = _InfoWidget()
         info_layout = QVBoxLayout(info)
-        info_layout.setContentsMargins(8, 5, 8, 6)
+        info_layout.setContentsMargins(8, 6, 6, 7)
         info_layout.setSpacing(2)
+
+        # Name row: label stretches left, star sits on the right
+        name_row = QHBoxLayout()
+        name_row.setContentsMargins(0, 0, 0, 0)
+        name_row.setSpacing(4)
 
         self.name_label = QLabel(self.asset_data.get("name", ""))
         self.name_label.setStyleSheet(
-            "font-size: 11px; font-weight: 500; color: %s; background: transparent;" % TEXT_PRIMARY
+            "font-size: 11px; font-weight: 600; color: %s; background: transparent;" % TEXT_PRIMARY
         )
-        self.name_label.setMaximumWidth(9999)
-        self.name_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.name_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
 
-        cat = self.asset_data.get("category", "")
-        ft  = self._selected_filetype or self.asset_data.get("filetype", "")
-        self.sub_label = QLabel("%s · %s" % (cat, ft))
+        self.star_btn = _StarBtn(info)
+        self.star_btn.setFixedSize(18, 18)
+        self.star_btn.setCursor(Qt.PointingHandCursor)
+        self.star_btn.clicked.connect(self._onStarClicked)
+        self.star_btn.setFav(self._is_fav)
+
+        name_row.addWidget(self.name_label)
+        name_row.addWidget(self.star_btn, 0, Qt.AlignVCenter)
+
+        cat    = self.asset_data.get("category", "")
+        subcat = self.asset_data.get("subcategory", "")
+        sub_text = ("%s / %s" % (cat, subcat)) if subcat else cat
+        self.sub_label = QLabel(sub_text)
         self.sub_label.setStyleSheet(
             "font-size: 10px; color: %s; font-family: 'IBM Plex Mono', monospace;"
             " background: transparent;" % TEXT_TERTIARY
         )
 
-        info_layout.addWidget(self.name_label)
+        info_layout.addLayout(name_row)
         info_layout.addWidget(self.sub_label)
         layout.addWidget(info)
 
@@ -176,11 +184,9 @@ class AssetCard(QWidget):
 
     def setCardWidth(self, w):
         thumb_h = max(60, w)
-        card_h  = thumb_h + 46
+        card_h  = thumb_h + 50
         self.setFixedSize(w, card_h)
         self.thumb.setFixedSize(w, thumb_h)
-
-        self.star_btn.move(5, 4)
 
         mid_y = (thumb_h - 44) // 2
         self.arrow_left.move(5, mid_y)
@@ -196,7 +202,7 @@ class AssetCard(QWidget):
         self.thumb_counter.adjustSize()
         self.thumb_counter.move(5, thumb_h - self.thumb_counter.height() - 5)
 
-        overlays = [self.star_btn, self.arrow_left, self.arrow_right, self.thumb_counter]
+        overlays = [self.arrow_left, self.arrow_right, self.thumb_counter]
         for w_ in overlays:
             w_.raise_()
         for dot in self._dots.values():
@@ -212,9 +218,6 @@ class AssetCard(QWidget):
         self._hover = True
         self._border.setHover(True)
         self._border._selected = self._selected
-        if not self._is_fav:
-            self.star_btn.show()
-            self.star_btn.raise_()
         for dot in self._dots.values():
             dot.show()
             dot.raise_()
@@ -226,8 +229,6 @@ class AssetCard(QWidget):
             return
         self._hover = False
         self._border.setHover(self._selected)
-        if not self._is_fav:
-            self.star_btn.hide()
         for dot in self._dots.values():
             dot.hide()
         self.arrow_left.hide()
@@ -262,11 +263,6 @@ class AssetCard(QWidget):
     def _onStarClicked(self):
         self._is_fav = not self._is_fav
         self.star_btn.setFav(self._is_fav)
-        if self._is_fav:
-            self.star_btn.show()
-            self.star_btn.raise_()
-        elif not self._hover:
-            self.star_btn.hide()
         self.starToggled.emit(self.asset_data.get("id", -1), self._is_fav)
 
     def _onArrowLeft(self):
@@ -352,9 +348,15 @@ class AssetCard(QWidget):
         menu = _RoundedMenu(self)
         menu.setStyleSheet(ss)
 
+        menu.addAction("Edit info…").triggered.connect(self._onEditAsset)
+        menu.addSeparator()
+
         if self._versions:
             ver_menu = _RoundedMenu("Version", menu)
             ver_menu.setStyleSheet(ss)
+            ver_menu.addAction("Add version…").triggered.connect(self._onAddVersion)
+            ver_menu.addAction("Edit version…").triggered.connect(self._onEditVersion)
+            ver_menu.addSeparator()
             grp = QActionGroup(ver_menu)
             grp.setExclusive(True)
             seen = set()
@@ -372,49 +374,76 @@ class AssetCard(QWidget):
                 ver_menu.addAction(a)
             menu.addMenu(ver_menu)
 
-        if self._filetypes:
-            ft_menu = _RoundedMenu("File type", menu)
-            ft_menu.setStyleSheet(ss)
-            grp2 = QActionGroup(ft_menu)
-            grp2.setExclusive(True)
-            for ft in self._filetypes:
-                checked = ft == self._selected_filetype
-                a = QAction(("● " if checked else "   ") + ft, ft_menu)
-                a.setCheckable(True)
-                a.setChecked(checked)
-                a.triggered.connect(lambda _, f=ft: self._onFiletypePicked(f))
-                grp2.addAction(a)
-                ft_menu.addAction(a)
-            menu.addMenu(ft_menu)
-
-        usd_exts = {".usd", ".usda", ".usdc", ".usdz"}
-        has_usd = any(
-            os.path.splitext(v.get("filepath", ""))[1].lower() in usd_exts
-            for v in self._versions
-        )
-        if has_usd:
-            menu.addSeparator()
-            menu.addAction("View USD").triggered.connect(self._onViewUSD)
-            menu.addAction("View USD via Prism").triggered.connect(self._onViewUSDPrism)
-
         menu.addSeparator()
         menu.addAction("Open in Explorer").triggered.connect(self._onOpenInExplorer)
+        menu.addAction("Copy path").triggered.connect(self._onCopyPath)
         menu.addSeparator()
         fav_label = "Remove from Favorites" if self._is_fav else "Add to Favorites"
         menu.addAction(fav_label).triggered.connect(self._onStarClicked)
-        menu.addAction("Edit asset…").triggered.connect(self._onEditAsset)
         menu.addAction("Omit asset…").triggered.connect(self._onOmitAsset)
 
         menu.exec_(e.globalPos())
 
     def _onVersionPicked(self, version):
         self._selected_version = version
+        self._rescanThumbsForVersion(version)
+        self._showThumb()
+        self._updateDotStyles()
+        self._refreshArrows()
+        self._refreshCounter()
+        # Sync filetype with the selected version
+        for v in self._versions:
+            if v.get("version") == version:
+                ft = v.get("filetype", "")
+                if ft:
+                    self._selected_filetype = ft
+                break
         self.versionChanged.emit(self.asset_data.get("id", -1), version)
+
+    def _rescanThumbsForVersion(self, version):
+        """Re-scan thumbnails from the given version's thumbnail_path."""
+        self._view_thumbs = {"material": [], "clay": [], "wire": []}
+        self._current_view = "material"
+        self._current_idx = 0
+        lib_root = self.asset_data.get("_lib_root", "") or ""
+        tp = ""
+        # First: try the version's stored thumbnail_path
+        for v in self._versions:
+            if v.get("version") == version:
+                tp = v.get("thumbnail_path", "") or ""
+                if tp:
+                    break
+                # Second: derive thumbs dir from the version's filepath
+                fp = v.get("filepath", "") or ""
+                if fp:
+                    tp = os.path.join(os.path.dirname(fp), "thumbs")
+                    break
+        if not tp:
+            # Fallback: asset-level thumbnail_path (usually points at the latest)
+            tp = self.asset_data.get("thumbnail_path", "") or ""
+        if not tp:
+            return
+        if tp and not os.path.isabs(tp) and lib_root:
+            tp = os.path.join(lib_root, tp)
+        if os.path.isfile(tp):
+            self._view_thumbs["material"] = [tp]
+        elif os.path.isdir(tp):
+            try:
+                names = sorted(os.listdir(tp))
+            except OSError:
+                return
+            for fname in names:
+                low = fname.lower()
+                if not low.endswith((".png", ".jpg", ".jpeg")):
+                    continue
+                fpath = os.path.join(tp, fname)
+                for view, _ in _VIEWS:
+                    if view in low:
+                        self._view_thumbs[view].append(fpath)
+                        break
 
     def _onFiletypePicked(self, filetype):
         self._selected_filetype = filetype
-        cat = self.asset_data.get("category", "")
-        self.sub_label.setText("%s · %s" % (cat, filetype))
         self.filetypeChanged.emit(self.asset_data.get("id", -1), filetype)
 
     def _onOpenInExplorer(self):
@@ -436,6 +465,22 @@ class AssetCard(QWidget):
         elif lib_root and os.path.isdir(lib_root):
             subprocess.Popen(["explorer", os.path.normpath(lib_root)])
 
+    def _onCopyPath(self):
+        from qtpy.QtWidgets import QApplication
+        lib_root = self.asset_data.get("_lib_root", "")
+        filepath = ""
+        for v in self._versions:
+            if (v.get("version") == self._selected_version
+                    and v.get("filetype") == self._selected_filetype):
+                filepath = v.get("filepath", "")
+                break
+        if not filepath:
+            filepath = self.asset_data.get("filepath", "")
+        if filepath and not os.path.isabs(filepath) and lib_root:
+            filepath = os.path.join(lib_root, filepath)
+        if filepath:
+            QApplication.clipboard().setText(os.path.normpath(filepath))
+
     def _onViewUSD(self):
         pass
 
@@ -444,6 +489,25 @@ class AssetCard(QWidget):
 
     def _onEditAsset(self):
         self.editRequested.emit(self.asset_data)
+
+    def _onEditVersion(self):
+        # Find the version dict matching the currently selected version + filetype
+        for v in self._versions:
+            if (v.get("version") == self._selected_version
+                    and v.get("filetype") == self._selected_filetype):
+                self.editVersionRequested.emit(v)
+                return
+        # Fallback: emit the first version that matches the selected version
+        for v in self._versions:
+            if v.get("version") == self._selected_version:
+                self.editVersionRequested.emit(v)
+                return
+        # Last resort: emit the latest version
+        if self._versions:
+            self.editVersionRequested.emit(self._versions[-1])
+
+    def _onAddVersion(self):
+        self.addVersionRequested.emit(self.asset_data)
 
     def _onOmitAsset(self):
         self.omitRequested.emit(self.asset_data)
@@ -581,7 +645,7 @@ class _StarBtn(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedSize(22, 22)
+        self.setFixedSize(18, 18)
         self._fav   = False
         self._hover = False
         self.setAttribute(Qt.WA_NoSystemBackground)
@@ -594,7 +658,11 @@ class _StarBtn(QWidget):
     def paintEvent(self, _e):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        star = self._starPath(11, 11, 9, 4.5)
+        cx = self.width() / 2
+        cy = self.height() / 2
+        outer = min(self.width(), self.height()) * 0.41
+        inner = outer * 0.5
+        star = self._starPath(cx, cy, outer, inner)
         if self._fav:
             color = QColor(0xff, 0xe0, 0x60) if self._hover else QColor(0xf0, 0xc0, 0x30)
             p.setPen(Qt.NoPen)

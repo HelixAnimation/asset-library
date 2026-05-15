@@ -99,15 +99,35 @@ class AssetImporter:
     # ------------------------------------------------------------------
 
     def import_asset(self, data, thumbnails=None, texture_files=None):
-        """Full pipeline: validate -> copy -> thumbnail -> textures -> DB write."""
+        """Full pipeline: validate -> determine version -> copy -> thumbnails -> DB write."""
         errors = self.validate(data)
         if errors:
             return ImportResult(False, error="\n".join(errors), error_type="validation")
 
+        prism_path = self.build_prism_path(data)
+        filetype = data.get("filetype") or (
+            os.path.splitext(data["filepaths"][0])[1].lower()
+            if data.get("filepaths") else ""
+        )
+
+        # Check if asset exists and determine version
+        existing = self.db.conn.execute(
+            "SELECT id FROM assets WHERE prism_path = ?", (prism_path,)
+        ).fetchone()
+
+        if existing:
+            asset_id = existing[0]
+            # Always auto-increment for existing assets — ignore dialog's "v001"
+            version = self.db.next_version_number(asset_id)
+        else:
+            asset_id = None
+            version = data.get("version", "v001")
+
+        data["version"] = version
         version_dir = self.build_nas_path(data)
         filepaths = data.get("filepaths") or []
 
-        # 1. Copy all files
+        # 1. Copy all files to version directory
         copied = []
         try:
             for src in filepaths:
@@ -122,10 +142,6 @@ class AssetImporter:
             return ImportResult(False, error="Copy failed: %s" % exc, error_type="copy")
 
         primary_rel = self._rel(copied[0]) if copied else ""
-        prism_path = self.build_prism_path(data)
-        filetype = data.get("filetype") or (
-            os.path.splitext(filepaths[0])[1].lower() if filepaths else ""
-        )
 
         # 2. Thumbnails — stored inside the version folder
         thumb_rel = self._handle_thumbnails(version_dir, data["name"], thumbnails or {})
@@ -137,29 +153,40 @@ class AssetImporter:
 
         # 4. DB write
         try:
-            existing = self.db.conn.execute(
-                "SELECT id FROM assets WHERE prism_path = ?", (prism_path,)
-            ).fetchone()
-
-            if existing:
-                asset_id = existing[0]
+            if asset_id:
+                # Update asset's version-level columns to reflect new version
                 self.db.update_asset(asset_id, {
                     "filepath": primary_rel,
                     "filetype": filetype,
-                    "version": "v001",
+                    "version": version,
                     "thumbnail_path": thumb_rel or "",
+                    "renderer": data.get("renderer", "Any"),
+                    "dcc": data.get("dcc", "Universal"),
+                    "has_rig": int(data.get("has_rig", 0)),
+                    "has_textures": int(data.get("has_textures", 0)),
+                    "has_materials": int(data.get("has_materials", 0)),
                 })
             else:
                 asset_data = {k: v for k, v in data.items() if not k.startswith("_")}
                 asset_data["filepath"] = primary_rel
                 asset_data["filetype"] = filetype
                 asset_data["prism_path"] = prism_path
+                asset_data["version"] = version
                 asset_data.pop("filepaths", None)
                 if thumb_rel:
                     asset_data["thumbnail_path"] = thumb_rel
                 asset_id = self.db.add_asset(asset_data)
 
-            self.db.upsert_version(asset_id, "v001", primary_rel, filetype, prism_path)
+            # Write version row with full version-level metadata
+            self.db.upsert_version(
+                asset_id, version, primary_rel, filetype, prism_path,
+                renderer=data.get("renderer"),
+                dcc=data.get("dcc"),
+                has_rig=data.get("has_rig", 0),
+                has_textures=data.get("has_textures", 0),
+                has_materials=data.get("has_materials", 0),
+                thumbnail_path=thumb_rel,
+            )
             if data.get("tags"):
                 self.db.set_asset_tags(asset_id, data["tags"])
         except sqlite3.Error as exc:

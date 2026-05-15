@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 5
 
 _SCHEMA_V1 = """
 PRAGMA foreign_keys = ON;
@@ -84,6 +84,16 @@ _MIGRATION_V4 = """
 ALTER TABLE assets ADD COLUMN omitted INTEGER NOT NULL DEFAULT 0;
 """
 
+# Migration to v5: adds version-level columns to versions table
+_MIGRATION_V5 = """
+ALTER TABLE versions ADD COLUMN renderer       TEXT NOT NULL DEFAULT 'Any';
+ALTER TABLE versions ADD COLUMN dcc            TEXT NOT NULL DEFAULT 'Universal';
+ALTER TABLE versions ADD COLUMN has_rig        INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE versions ADD COLUMN has_textures   INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE versions ADD COLUMN has_materials  INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE versions ADD COLUMN thumbnail_path TEXT;
+"""
+
 
 def _now():
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -152,6 +162,11 @@ class AssetDB:
         if current < 4:
             self.conn.executescript(_MIGRATION_V4)
             self.conn.execute("UPDATE schema_version SET version = 4")
+            self.conn.commit()
+
+        if current < 5:
+            self.conn.executescript(_MIGRATION_V5)
+            self.conn.execute("UPDATE schema_version SET version = 5")
             self.conn.commit()
 
     # ------------------------------------------------------------------
@@ -393,15 +408,39 @@ class AssetDB:
             ).fetchone()
         return dict(row) if row else None
 
-    def upsert_version(self, asset_id, version, filepath, filetype, prism_path=None):
+    def upsert_version(self, asset_id, version, filepath, filetype, prism_path=None,
+                       renderer=None, dcc=None,
+                       has_rig=0, has_textures=0, has_materials=0,
+                       thumbnail_path=None):
         now = _now()
         self.conn.execute(
-            "INSERT INTO versions (asset_id, version, filepath, filetype, prism_path, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?) "
+            "INSERT INTO versions (asset_id, version, filepath, filetype, prism_path,"
+            " renderer, dcc, has_rig, has_textures, has_materials, thumbnail_path, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(asset_id, version, filetype) DO UPDATE SET "
-            "filepath = excluded.filepath, prism_path = excluded.prism_path",
-            (asset_id, version, filepath, filetype, prism_path, now),
+            "filepath = excluded.filepath, prism_path = excluded.prism_path,"
+            " renderer = excluded.renderer, dcc = excluded.dcc,"
+            " has_rig = excluded.has_rig, has_textures = excluded.has_textures,"
+            " has_materials = excluded.has_materials,"
+            " thumbnail_path = excluded.thumbnail_path",
+            (asset_id, version, filepath, filetype, prism_path,
+             renderer or "Any", dcc or "Universal",
+             int(has_rig), int(has_textures), int(has_materials),
+             thumbnail_path, now),
         )
+        self.conn.commit()
+
+    def update_version(self, version_id, data):
+        """Update version metadata columns by version row id."""
+        now = _now()
+        allowed = {"renderer", "dcc", "has_rig", "has_textures",
+                   "has_materials", "thumbnail_path", "filepath", "filetype"}
+        filtered = {k: v for k, v in data.items() if k in allowed}
+        if not filtered:
+            return
+        sets = ", ".join("%s = ?" % k for k in filtered)
+        params = list(filtered.values()) + [version_id]
+        self.conn.execute("UPDATE versions SET %s WHERE id = ?" % sets, params)
         self.conn.commit()
 
     def delete_version(self, asset_id, version, filetype=None):
@@ -416,6 +455,33 @@ class AssetDB:
                 (asset_id, version),
             )
         self.conn.commit()
+
+    def get_version_by_id(self, version_id):
+        row = self.conn.execute(
+            "SELECT * FROM versions WHERE id = ?", (version_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def get_latest_version(self, asset_id):
+        row = self.conn.execute(
+            "SELECT * FROM versions WHERE asset_id = ? ORDER BY rowid DESC LIMIT 1",
+            (asset_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def next_version_number(self, asset_id):
+        """Return the next version string (e.g. 'v002') for an asset."""
+        row = self.conn.execute(
+            "SELECT version FROM versions WHERE asset_id = ? ORDER BY version DESC LIMIT 1",
+            (asset_id,),
+        ).fetchone()
+        if row is None:
+            return "v001"
+        try:
+            num = int(row[0].lstrip("v").lstrip("0") or "0")
+            return "v%03d" % (num + 1)
+        except (ValueError, AttributeError):
+            return "v001"
 
     def get_filetypes_for_asset(self, asset_id):
         rows = self.conn.execute(

@@ -215,16 +215,17 @@ A finalized HTML mockup (`index.html`) exists and should be used as the visual s
 14. ✅ **Thumbnail generation** — manual browse in publish dialog + auto placeholder (colored + first letter)
 15. ✅ **Edit asset** — pre-fill import dialog from DB, update metadata, right-click → Edit asset…
 
-### Phase 5 — 3D view ⬜
-16. ⬜ **3D asset preview** — inline 3D viewer for asset cards (rotate, zoom, pan)
-17. ⬜ **3D view toggle** — switch between 2D thumbnail and 3D preview on cards
+### Phase 5 — DCC integration 🔶
+16. ⬜ **Drag and drop import** — drag card into Houdini or Maya viewport via `core/dcc_bridge.py`
+17. ⬜ **Houdini bridge** — import/reference asset, set up for rendering, launch usdview
+18. ⬜ **Maya bridge** — `maya.cmds` equivalent for import/reference and render setup
+19. 🔶 **Thumbnail render pipeline** — Asset Publisher HDA built and wired; geometry export + publish untested end-to-end
 
-### Phase 6 — DCC integration ⬜
-18. ⬜ **Drag and drop** — drag card into Houdini or Maya viewport via `core/dcc_bridge.py`
+### Phase 6 — 3D view & USD ⬜
 19. ⬜ **View USD** — launch usdview (or Houdini/Maya USD viewer)
 20. ⬜ **View USD via Prism** — open through Prism's version browser
-21. ⬜ **Houdini bridge** — Python API calls for import, reference, usdview
-22. ⬜ **Maya bridge** — `maya.cmds` equivalent
+21. ⬜ **3D asset preview** — inline 3D viewer for asset cards (rotate, zoom, pan)
+22. ⬜ **3D view toggle** — switch between 2D thumbnail and 3D preview on cards
 
 ---
 
@@ -246,8 +247,57 @@ Hard-won fixes to avoid re-breaking:
 
 ---
 
+## Houdini Asset Publisher HDA
+
+Lives at `Plugins/AssetLibrary/HDA/object_AssetPublisher.1.2.hda`.
+Rebuilt by running `HDA/build_hda.py` in Houdini's Python shell.
+Type name: `AssetPublisher::1.2` (Object context subnet).
+
+### Internal network structure
+```
+/obj/AssetPublisher/
+  ├── lookdev_scene        (lookdev_scene::2.14)
+  │     objpath2 → ../asset_preview   (Python expr, auto-scales cyclorama)
+  │     lookdev_camera     (camera used by rs_thumb ROP)
+  │
+  ├── asset_preview        (geo Object)
+  │     objectmerge1  →  reads source_node parm, resolves to absolute path
+  │     Asset_Transform1   (Asset_Transform::2.2, Select_Transform=AboveGround)
+  │     OUT (null)         ← display/render flag
+  │
+  └── ropnet1
+        rs_thumb           (Redshift_ROP)
+              RS_renderCamera   → lookdev_scene/lookdev_camera  (Python expr)
+              RS_objects_exclude → source_node absolute path    (Python expr)
+              f1 / f2           → thumb_frame parm              (Python expr)
+```
+
+### Render thumbnail flow
+Artist clicks **Render Thumbnails** in the HDA → `houdini_publisher.render_thumbnails_action(node)` → `HoudiniBridge.render_thumbnails(source, output_dir, lookdev_path, frame, passes)`:
+1. Calls `pub.allowEditingOfContents()` to unlock for parm writes
+2. Finds `ropnet1/rs_thumb` — pre-wired camera + exclude expression, no temp nodes at `/out`
+3. For each enabled pass (material / clay / wire):
+   - Sets `RS_outputFileNamePrefix` on the internal ROP to a temp path
+   - Clay/wire: creates temp RS material in `/mat`, sets `asset_preview.shop_materialpath`
+   - Presses `rop.execute` (runs in Houdini main thread — not via MCP)
+   - Restores `shop_materialpath`, destroys temp material
+4. Returns `{"material": path, "clay": path, "wire": path}`
+
+### Key parm-path expressions (all use `hou.node('../..')` to reach AssetPublisher)
+- `objectmerge1.objpath1` — resolves `source_node` relative path to absolute (from geo1 context)
+- `rs_thumb.RS_objects_exclude` — same resolution pattern (from ropnet1/rs_thumb context)
+- `lookdev_scene.objpath2` — `hou.node('../asset_preview').path()`
+- `rs_thumb.RS_renderCamera` — `hou.node('../../lookdev_scene/lookdev_camera').path()`
+
+### HDA rebuild notes
+- Always source parms from `object_AssetPublisher.1.1.hda` (stable reference, never overwritten)
+- After rebuilding, uninstall all `AssetPublisher::1.2` conflicts (backups, temp files) — multiple installs with the same type name break the Tab menu
+- `ignore_external_references=True` required on `createDigitalAsset()` due to lookdev_scene internal camera references
+
+---
+
 ## Open questions / deferred decisions
 
-- Thumbnail generation strategy (auto-render vs manual screenshot on publish)
+- Thumbnail render → publish flow not yet tested end-to-end (next: test with a real asset)
 - Whether to use Prism's existing publish hooks or intercept earlier in the pipeline
 - Permission enforcement — currently planned at filesystem level (NAS), not in the plugin itself

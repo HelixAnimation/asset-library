@@ -40,13 +40,24 @@ class PublishDialog(QDialog):
         self._disk_projects = disk_projects or []
         self._active_project = active_project or ""
         self._is_edit = bool(self.prefill.get("_edit_id"))
+        self._is_add_version = bool(self.prefill.get("_add_version_asset_id"))
 
-        self.setWindowTitle("Edit Asset" if self._is_edit else "Import Asset")
+        if self._is_edit:
+            title = "Edit Asset"
+        elif self._is_add_version:
+            title = "Add Version"
+        else:
+            title = "Import Asset"
+        self.setWindowTitle(title)
         self.setFixedWidth(452)
         self.setStyleSheet(self._buildStylesheet())
         self._tags = list(self.prefill.get("tags", []))
         self._build()
         self._populate()
+        if self._is_edit:
+            self.resize(452, 480)
+        else:
+            self.resize(452, 640)
 
     # ------------------------------------------------------------------
     # Build
@@ -121,34 +132,42 @@ class PublishDialog(QDialog):
             fp_lbl.setWordWrap(True)
             body_layout.addWidget(fp_lbl)
 
-        # Asset name
-        body_layout.addWidget(self._field("ASSET NAME"))
+        # Asset name + category/subcategory — hidden in add-version mode
+        asset_meta = QWidget()
+        asset_meta.setVisible(not self._is_add_version)
+        am_layout = QVBoxLayout(asset_meta)
+        am_layout.setContentsMargins(0, 0, 0, 0)
+        am_layout.setSpacing(12)
+
+        am_layout.addWidget(self._field("ASSET NAME"))
         self.name_edit = QLineEdit()
         self.name_edit.setPlaceholderText("Asset name")
-        body_layout.addWidget(self.name_edit)
+        am_layout.addWidget(self.name_edit)
 
-        # Category + Subcategory
         cs_row = QHBoxLayout()
         cs_row.setSpacing(10)
-
         cat_col = QVBoxLayout()
         cat_col.setSpacing(4)
         cat_col.addWidget(self._field("CATEGORY"))
         self.cat_combo = _NoScrollCombo()
         self.cat_combo.addItems(_CATEGORIES + ["＋ Add custom…"])
         cat_col.addWidget(self.cat_combo)
-
         sub_col = QVBoxLayout()
         sub_col.setSpacing(4)
         sub_col.addWidget(self._field("SUBCATEGORY"))
         self.sub_combo = _NoScrollCombo()
         sub_col.addWidget(self.sub_combo)
-
         cs_row.addLayout(cat_col)
         cs_row.addLayout(sub_col)
-        body_layout.addLayout(cs_row)
+        am_layout.addLayout(cs_row)
 
-        # Renderer + DCC
+        body_layout.addWidget(asset_meta)
+
+        # Renderer + DCC — only in import mode (version-level fields)
+        rd_widget = QWidget()
+        rd_layout = QVBoxLayout(rd_widget)
+        rd_layout.setContentsMargins(0, 0, 0, 0)
+        rd_layout.setSpacing(0)
         rd_row = QHBoxLayout()
         rd_row.setSpacing(10)
         for label_text, attr, items in [
@@ -162,15 +181,22 @@ class PublishDialog(QDialog):
             setattr(self, attr, combo)
             col.addWidget(combo)
             rd_row.addLayout(col)
-        body_layout.addLayout(rd_row)
+        rd_layout.addLayout(rd_row)
+        rd_widget.setVisible(not self._is_edit)
+        body_layout.addWidget(rd_widget)
 
         # Connect category/subcategory signals and seed subcategory list
         self.cat_combo.currentIndexChanged.connect(self._onCatIndexChanged)
         self.sub_combo.currentIndexChanged.connect(self._onSubIndexChanged)
         self._refreshSubcategory(_CATEGORIES[0])
 
-        # Includes
-        body_layout.addWidget(self._field("INCLUDES"))
+        # Includes — only in import mode (version-level)
+        inc_widget = QWidget()
+        inc_widget.setVisible(not self._is_edit)
+        inc_layout = QVBoxLayout(inc_widget)
+        inc_layout.setContentsMargins(0, 0, 0, 0)
+        inc_layout.setSpacing(4)
+        inc_layout.addWidget(self._field("INCLUDES"))
         inc_row = QHBoxLayout()
         inc_row.setSpacing(16)
         self.chk_rig = QCheckBox("Rig")
@@ -178,19 +204,27 @@ class PublishDialog(QDialog):
         for c in (self.chk_rig, self.chk_mat):
             inc_row.addWidget(c)
         inc_row.addStretch()
-        body_layout.addLayout(inc_row)
+        inc_layout.addLayout(inc_row)
+        body_layout.addWidget(inc_widget)
 
-        # Tags
-        body_layout.addWidget(self._field("TAGS"))
+        # Tags + project — hidden in add-version mode
+        meta_widget = QWidget()
+        meta_widget.setVisible(not self._is_add_version)
+        meta_layout = QVBoxLayout(meta_widget)
+        meta_layout.setContentsMargins(0, 0, 0, 0)
+        meta_layout.setSpacing(12)
+
+        meta_layout.addWidget(self._field("TAGS"))
         self.tag_container = _TagContainer(self._tags, suggestions=self._db_tags)
-        body_layout.addWidget(self.tag_container)
+        meta_layout.addWidget(self.tag_container)
 
-        # Project
-        body_layout.addWidget(self._field("PROJECT"))
+        meta_layout.addWidget(self._field("PROJECT"))
         self.project_combo = _NoScrollCombo()
         self.project_combo.setEditable(True)
         self.project_combo.lineEdit().setPlaceholderText("Project name")
-        body_layout.addWidget(self.project_combo)
+        meta_layout.addWidget(self.project_combo)
+
+        body_layout.addWidget(meta_widget)
 
         body_layout.addStretch()
         scroll.setWidget(body)
@@ -205,7 +239,12 @@ class PublishDialog(QDialog):
         f_layout.addStretch()
         cancel = QPushButton("Cancel")
         cancel.clicked.connect(self.reject)
-        submit_text = "Save Changes" if self._is_edit else "Import Asset"
+        if self._is_edit:
+            submit_text = "Save Changes"
+        elif self._is_add_version:
+            submit_text = "Add Version"
+        else:
+            submit_text = "Import Asset"
         submit = QPushButton(submit_text)
         submit.setObjectName("submitBtn")
         submit.clicked.connect(self._onSubmit)
@@ -365,10 +404,13 @@ class PublishDialog(QDialog):
     # ------------------------------------------------------------------
 
     def _onSubmit(self):
-        name = self.name_edit.text().strip()
-        if not name:
-            self._highlightField(self.name_edit)
-            return
+        if self._is_add_version:
+            name = self.prefill.get("name", "")
+        else:
+            name = self.name_edit.text().strip()
+            if not name:
+                self._highlightField(self.name_edit)
+                return
 
         filepaths = []
         if not self._is_edit:
@@ -396,8 +438,8 @@ class PublishDialog(QDialog):
         data = {
             "name":          name,
             "version":       "v001",
-            "category":      self.cat_combo.currentText(),
-            "subcategory":   self.sub_combo.currentText(),
+            "category":      self.prefill.get("category") if self._is_add_version else self.cat_combo.currentText(),
+            "subcategory":   self.prefill.get("subcategory") if self._is_add_version else self.sub_combo.currentText(),
             "filepaths":     filepaths,
             "filetype":      filetype,
             "renderer":      self.renderer_combo.currentText(),
@@ -415,6 +457,15 @@ class PublishDialog(QDialog):
         edit_id = self.prefill.get("_edit_id")
         if edit_id:
             data["_edit_id"] = edit_id
+            # Strip version-level fields — only asset-level data for edit
+            for key in ("filepaths", "filetype", "renderer", "dcc",
+                        "version", "has_rig", "has_textures", "has_materials",
+                        "_thumbnails", "_texture_files"):
+                data.pop(key, None)
+
+        add_version_id = self.prefill.get("_add_version_asset_id")
+        if add_version_id:
+            data["_add_version_asset_id"] = add_version_id
 
         self.assetSubmitted.emit(data)
         self.accept()
