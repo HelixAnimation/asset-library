@@ -6,3 +6,7 @@ __pycache__/
 *.txt
 AGENTS.md
 HANDOFF_SUMMARY.md
+
+# HDA build artifacts
+Plugins/AssetLibrary/HDA/backup/
+C:/Temp/ap_rebuild.hda
