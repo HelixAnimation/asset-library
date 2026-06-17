@@ -33,9 +33,11 @@ class AssetCard(QWidget):
     versionChanged  = Signal(int, str)
     filetypeChanged = Signal(int, str)
     editRequested        = Signal(dict)
-    editVersionRequested = Signal(dict)   # emits version dict for metadata editing
-    addVersionRequested  = Signal(dict)   # emits asset_data for new version import
+    editVersionRequested = Signal(dict)
+    addVersionRequested  = Signal(dict)
     omitRequested        = Signal(dict)
+    loadInHoudiniRequested = Signal(dict, str)  # (load_data, mode)
+    refreshRequested = Signal(int)  # asset_id
 
     def __init__(self, asset_data, is_favorite=False, versions=None,
                  filetypes=None, parent=None):
@@ -49,6 +51,7 @@ class AssetCard(QWidget):
         self._current_view = "material"
         self._view_thumbs  = {"material": [], "clay": [], "wire": []}
         self._current_idx  = 0
+        self._wire_overlay = False
         self._selected     = False
         self._hover        = False
         self._scanThumbs()
@@ -97,6 +100,9 @@ class AssetCard(QWidget):
         layout.setSpacing(0)
 
         self.thumb = _ThumbWidget(self.asset_data, self)
+        self.thumb.clicked.connect(lambda: self.assetClicked.emit(self.asset_data))
+        self.thumb.doubleClicked.connect(lambda: self.assetImport.emit(self.asset_data))
+        self.thumb.scrubDelta.connect(self._onScrubDelta)
         layout.addWidget(self.thumb)
 
         # ── Overlays (absolute children of the card, not thumb) ──────
@@ -119,6 +125,11 @@ class AssetCard(QWidget):
             dot.hide()
             dot.clicked.connect(lambda v=view: self._onViewDotClicked(v))
             self._dots[view] = dot
+
+        # Wire overlay toggle — top-right of thumbnail
+        self._wire_btn = _WireOverlayBtn(self)
+        self._wire_btn.hide()
+        self._wire_btn.clicked.connect(self._onWireOverlayToggle)
 
         # Counter pill — top-right
         self.thumb_counter = _CounterLabel("", self)
@@ -202,7 +213,10 @@ class AssetCard(QWidget):
         self.thumb_counter.adjustSize()
         self.thumb_counter.move(5, thumb_h - self.thumb_counter.height() - 5)
 
-        overlays = [self.arrow_left, self.arrow_right, self.thumb_counter]
+        self._wire_btn.adjustSize()
+        self._wire_btn.move(w - self._wire_btn.width() - 5, 5)
+
+        overlays = [self.arrow_left, self.arrow_right, self.thumb_counter, self._wire_btn]
         for w_ in overlays:
             w_.raise_()
         for dot in self._dots.values():
@@ -223,6 +237,7 @@ class AssetCard(QWidget):
             dot.raise_()
         self._refreshArrows()
         self._refreshCounter()
+        self._refreshWireBtn()
 
     def _onHoverLeave(self):
         if self.underMouse():
@@ -234,6 +249,7 @@ class AssetCard(QWidget):
         self.arrow_left.hide()
         self.arrow_right.hide()
         self.thumb_counter.hide()
+        self._wire_btn.hide()
 
     def enterEvent(self, e):
         self._onHoverEnter()
@@ -279,15 +295,26 @@ class AssetCard(QWidget):
             self._showThumb()
             self._refreshCounter()
 
+    def _onScrubDelta(self, delta):
+        images = self._view_thumbs.get(self._current_view, [])
+        if images:
+            self._current_idx = (self._current_idx + delta) % len(images)
+            self._showThumb()
+            self._refreshCounter()
+
     def _onViewDotClicked(self, view):
         if not self._view_thumbs.get(view):
             return
+        if view == "wire" and self._wire_overlay:
+            self._wire_overlay = False
+            self._wire_btn.setActive(False)
         self._current_view = view
         self._current_idx  = 0
         self._showThumb()
         self._updateDotStyles()
         self._refreshArrows()
         self._refreshCounter()
+        self._refreshWireBtn()
 
     def mouseDoubleClickEvent(self, e):
         self.assetImport.emit(self.asset_data)
@@ -310,9 +337,12 @@ class AssetCard(QWidget):
             self.thumb.setImage(images[self._current_idx])
         else:
             self.thumb.clearImage()
+        wire_images = self._view_thumbs.get("wire", [])
+        self.thumb.setWireOverlay(wire_images, self._current_idx, self._wire_overlay)
 
     def _refreshArrows(self):
         n = len(self._view_thumbs.get(self._current_view, []))
+        self.thumb.setCanScrub(n > 1)
         if n > 1:
             self.arrow_left.show()
             self.arrow_left.raise_()
@@ -348,6 +378,7 @@ class AssetCard(QWidget):
         menu = _RoundedMenu(self)
         menu.setStyleSheet(ss)
 
+        menu.addAction("Refresh asset").triggered.connect(self._onRefreshAsset)
         menu.addAction("Edit info…").triggered.connect(self._onEditAsset)
         menu.addSeparator()
 
@@ -375,6 +406,11 @@ class AssetCard(QWidget):
             menu.addMenu(ver_menu)
 
         menu.addSeparator()
+        menu.addAction("Load in Houdini").triggered.connect(
+            lambda: self._onLoadInHoudini("import"))
+        menu.addAction("Reference in Houdini").triggered.connect(
+            lambda: self._onLoadInHoudini("reference"))
+        menu.addSeparator()
         menu.addAction("Open in Explorer").triggered.connect(self._onOpenInExplorer)
         menu.addAction("Copy path").triggered.connect(self._onCopyPath)
         menu.addSeparator()
@@ -383,6 +419,28 @@ class AssetCard(QWidget):
         menu.addAction("Omit asset…").triggered.connect(self._onOmitAsset)
 
         menu.exec_(e.globalPos())
+
+    def _onLoadInHoudini(self, mode):
+        lib_root = self.asset_data.get("_lib_root", "")
+        filepath = ""
+        for v in self._versions:
+            if (v.get("version") == self._selected_version
+                    and v.get("filetype") == self._selected_filetype):
+                filepath = v.get("filepath", "")
+                break
+        if not filepath:
+            filepath = self.asset_data.get("filepath", "")
+        if filepath and not os.path.isabs(filepath) and lib_root:
+            filepath = os.path.join(lib_root, filepath)
+        version_dir = os.path.dirname(filepath) if filepath else ""
+        load_data = {
+            "filepath":    filepath,
+            "version_dir": version_dir,
+            "name":        self.asset_data.get("name", "asset"),
+            "version":     self._selected_version,
+            "filetype":    self._selected_filetype,
+        }
+        self.loadInHoudiniRequested.emit(load_data, mode)
 
     def _onVersionPicked(self, version):
         self._selected_version = version
@@ -511,6 +569,54 @@ class AssetCard(QWidget):
 
     def _onOmitAsset(self):
         self.omitRequested.emit(self.asset_data)
+
+    def _onWireOverlayToggle(self):
+        self._wire_overlay = not self._wire_overlay
+        self._wire_btn.setActive(self._wire_overlay)
+        self._showThumb()
+
+    def _refreshWireBtn(self):
+        has_wire = bool(self._view_thumbs.get("wire"))
+        if self._hover and has_wire and self._current_view != "wire":
+            self._wire_btn.show()
+            self._wire_btn.raise_()
+        else:
+            self._wire_btn.hide()
+
+    def _onRefreshAsset(self):
+        self.refreshRequested.emit(self.asset_data.get("id", -1))
+
+    def refreshData(self, asset_data, is_fav, versions, filetypes):
+        """Update card in-place with fresh data from the DB."""
+        self.asset_data     = asset_data
+        self._is_fav        = is_fav
+        self._versions      = versions or []
+        self._filetypes     = filetypes or []
+
+        existing_versions = {v.get("version") for v in self._versions}
+        if self._selected_version not in existing_versions:
+            self._selected_version = asset_data.get("version", "")
+        existing_filetypes = {v.get("filetype") for v in self._versions}
+        if self._selected_filetype not in existing_filetypes:
+            self._selected_filetype = asset_data.get("filetype", "")
+
+        self._view_thumbs  = {"material": [], "clay": [], "wire": []}
+        self._current_idx  = 0
+        self._wire_overlay = False
+        self._wire_btn.setActive(False)
+        self._scanThumbs()
+
+        self.name_label.setText(asset_data.get("name", ""))
+        cat    = asset_data.get("category", "")
+        subcat = asset_data.get("subcategory", "")
+        self.sub_label.setText(("%s / %s" % (cat, subcat)) if subcat else cat)
+        self.star_btn.setFav(is_fav)
+
+        self._showThumb()
+        self._updateDotStyles()
+        self._refreshArrows()
+        self._refreshCounter()
+        self.update()
 
     def _menuStylesheet(self):
         return """
@@ -779,6 +885,54 @@ class _DotButton(QWidget):
         e.accept()
 
 
+# ── Wire overlay toggle button ───────────────────────────────────────────────
+
+class _WireOverlayBtn(QWidget):
+    """Small '#' pill in the top-right of the thumbnail; toggles wire overlay."""
+    clicked = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._active = False
+        self._hover  = False
+        self.setFixedSize(24, 20)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setAttribute(Qt.WA_NoSystemBackground)
+
+    def setActive(self, active):
+        self._active = active
+        self.update()
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setPen(Qt.NoPen)
+        if self._active:
+            p.setBrush(QColor(ACCENT))
+        else:
+            p.setBrush(QColor(0, 0, 0, 130 if self._hover else 85))
+        p.drawRoundedRect(QRectF(self.rect()), 4, 4)
+        p.setPen(QColor(255, 255, 255, 230 if self._active else 170))
+        font = p.font()
+        font.setPixelSize(11)
+        font.setBold(True)
+        p.setFont(font)
+        p.drawText(QRectF(self.rect()), Qt.AlignCenter, "#")
+
+    def enterEvent(self, e):
+        self._hover = True
+        self.update()
+
+    def leaveEvent(self, e):
+        self._hover = False
+        self.update()
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            self.clicked.emit()
+        e.accept()
+
+
 # ── Arrow button (matches HTML .thumb-arrow-btn) ────────────────────────────
 
 class _ArrowBtn(QWidget):
@@ -839,13 +993,76 @@ class _ArrowBtn(QWidget):
 # ── Thumbnail widget ────────────────────────────────────────────────────────
 
 class _ThumbWidget(QWidget):
+    clicked       = Signal()
+    doubleClicked = Signal()
+    scrubDelta    = Signal(int)
+
+    _DRAG_THRESHOLD = 4   # px before scrub activates
+    _SCRUB_PX       = 5   # px of drag per frame step
+
     def __init__(self, asset_data, parent=None):
         super().__init__(parent)
-        self.asset_data = asset_data
-        self._orig_px   = None
-        self._view_mode = "2d"
+        self.asset_data    = asset_data
+        self._orig_px      = None
+        self._view_mode    = "2d"
+        self._can_scrub    = False
+        self._scrub_start  = None
+        self._scrub_x      = None
+        self._scrub_accum  = 0
+        self._is_scrubbing = False
+        self._wire_images  = []
+        self._wire_idx     = 0
+        self._wire_overlay = False
         self.setAttribute(Qt.WA_OpaquePaintEvent)
         self.setAttribute(Qt.WA_StyledBackground, False)
+
+    def setCanScrub(self, can):
+        self._can_scrub = can
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            self._scrub_start  = e.x()
+            self._scrub_x      = e.x()
+            self._scrub_accum  = 0
+            self._is_scrubbing = False
+            e.accept()
+        else:
+            e.ignore()
+
+    def mouseMoveEvent(self, e):
+        if self._scrub_start is not None and (e.buttons() & Qt.LeftButton) and self._can_scrub:
+            if not self._is_scrubbing and abs(e.x() - self._scrub_start) >= self._DRAG_THRESHOLD:
+                self._is_scrubbing = True
+            if self._is_scrubbing:
+                dx = e.x() - self._scrub_x
+                self._scrub_x      = e.x()
+                self._scrub_accum += dx
+                frames = self._scrub_accum // self._SCRUB_PX
+                if frames:
+                    self._scrub_accum -= frames * self._SCRUB_PX
+                    self.scrubDelta.emit(frames)
+            e.accept()
+        else:
+            e.ignore()
+
+    def mouseReleaseEvent(self, e):
+        if e.button() == Qt.LeftButton and self._scrub_start is not None:
+            if not self._is_scrubbing:
+                self.clicked.emit()
+            self._scrub_start  = None
+            self._is_scrubbing = False
+            e.accept()
+        else:
+            e.ignore()
+
+    def mouseDoubleClickEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            self._scrub_start = None
+            self._is_scrubbing = False
+            self.doubleClicked.emit()
+            e.accept()
+        else:
+            e.ignore()
 
     def setImage(self, path):
         px = QPixmap(path)
@@ -858,6 +1075,12 @@ class _ThumbWidget(QWidget):
 
     def setViewMode(self, mode):
         self._view_mode = mode
+        self.update()
+
+    def setWireOverlay(self, images, idx, enabled):
+        self._wire_images  = list(images)
+        self._wire_idx     = max(0, min(idx, len(images) - 1)) if images else 0
+        self._wire_overlay = enabled
         self.update()
 
     def _baseColor(self):
@@ -929,6 +1152,21 @@ class _ThumbWidget(QWidget):
             x = (self.width()  - scaled.width())  // 2
             y = (self.height() - scaled.height()) // 2
             p.drawPixmap(x, y, scaled)
+
+            if self._wire_overlay and self._wire_images:
+                widx = min(self._wire_idx, len(self._wire_images) - 1)
+                wire_px = QPixmap(self._wire_images[widx])
+                if not wire_px.isNull():
+                    wire_scaled = wire_px.scaled(
+                        self.width(), self.height(),
+                        Qt.KeepAspectRatio,
+                        Qt.SmoothTransformation,
+                    )
+                    wx = (self.width()  - wire_scaled.width())  // 2
+                    wy = (self.height() - wire_scaled.height()) // 2
+                    p.setCompositionMode(QPainter.CompositionMode_Multiply)
+                    p.drawPixmap(wx, wy, wire_scaled)
+                    p.setCompositionMode(QPainter.CompositionMode_SourceOver)
         else:
             idx = _asset_palette_index(self.asset_data)
             bg, fg = THUMB_PALETTES[idx]

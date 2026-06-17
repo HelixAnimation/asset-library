@@ -10,6 +10,8 @@ _FILETYPE_CATEGORY = {
     ".hda":   "HDAs",
     ".otl":   "HDAs",
     ".abc":   "Models",
+    ".bgeo":  "Models",
+    ".bgeo.sc": "Models",
     ".fbx":   "Models",
     ".exr":   "Textures",   # also HDRIs — resolved below
     ".hdr":   "Lighting",
@@ -111,6 +113,10 @@ class PrismScanner:
             return
 
         for dirpath, dirnames, _ in os.walk(self._assets_root):
+            # Prune underscore-prefixed root-level dirs so os.walk never descends into them
+            if os.path.normpath(dirpath) == os.path.normpath(self._assets_root):
+                dirnames[:] = [d for d in dirnames if not d.startswith("_")]
+
             version_str = os.path.basename(dirpath)
             if not self._looks_like_version(version_str):
                 continue

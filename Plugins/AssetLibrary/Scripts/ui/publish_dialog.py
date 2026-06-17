@@ -161,6 +161,18 @@ class PublishDialog(QDialog):
         cs_row.addLayout(sub_col)
         am_layout.addLayout(cs_row)
 
+        pc_row = QHBoxLayout()
+        pc_row.setSpacing(10)
+        pc_col = QVBoxLayout()
+        pc_col.setSpacing(4)
+        pc_col.addWidget(self._field("POLYCOUNT"))
+        self.polycount_edit = QLineEdit()
+        self.polycount_edit.setPlaceholderText("Optional — polygon count")
+        pc_col.addWidget(self.polycount_edit)
+        pc_row.addLayout(pc_col)
+        pc_row.addStretch()
+        am_layout.addLayout(pc_row)
+
         body_layout.addWidget(asset_meta)
 
         # Renderer + DCC — only in import mode (version-level fields)
@@ -341,6 +353,11 @@ class PublishDialog(QDialog):
         if self.prefill.get("has_materials"):
             self.chk_mat.setChecked(bool(self.prefill["has_materials"]))
 
+        # Polycount
+        polycount = self.prefill.get("polycount")
+        if polycount is not None and int(polycount) > 0:
+            self.polycount_edit.setText(str(int(polycount)))
+
         # Author — stored internally, not shown in UI
         username = ""
         if self.plugin:
@@ -435,6 +452,12 @@ class PublishDialog(QDialog):
             }
             texture_files = self._texture_list.getFiles()
 
+        pc_text = self.polycount_edit.text().strip() if not self._is_add_version else ""
+        try:
+            polycount = int(pc_text) if pc_text else None
+        except ValueError:
+            polycount = None
+
         data = {
             "name":          name,
             "version":       "v001",
@@ -453,6 +476,8 @@ class PublishDialog(QDialog):
             "_thumbnails":    thumbnails,
             "_texture_files": texture_files,
         }
+        if polycount is not None:
+            data["polycount"] = polycount
 
         edit_id = self.prefill.get("_edit_id")
         if edit_id:

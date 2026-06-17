@@ -305,6 +305,8 @@ class LibraryBrowser(QMainWindow):
             card.editVersionRequested.connect(self._onEditVersion)
             card.addVersionRequested.connect(self._onAddVersion)
             card.omitRequested.connect(self._onOmitAsset)
+            card.loadInHoudiniRequested.connect(self._onLoadInHoudini)
+            card.refreshRequested.connect(self._onRefreshAsset)
             self._all_cards.append(card)
 
         names = [c.asset_data.get("name", "") for c in self._all_cards]
@@ -317,6 +319,33 @@ class LibraryBrowser(QMainWindow):
 
     def refreshAssets(self):
         self._loadFromDB()
+
+    def _onRefreshAsset(self, asset_id):
+        """Re-query the DB for a single asset and update its card in-place."""
+        if asset_id < 0:
+            return
+        db = self._getDB()
+        if db is None:
+            return
+        try:
+            asset = db.get_asset(asset_id)
+            if not asset:
+                return
+            lib_root = self.plugin._getAssetLibRoot() if self.plugin else ""
+            asset["_lib_root"] = lib_root
+            asset["tags"] = db.get_asset_tags(asset_id)
+            fav_ids  = db.batch_get_favorites([asset_id], self._username)
+            versions = db.batch_get_versions([asset_id]).get(asset_id, [])
+            filetypes = db.batch_get_filetypes([asset_id]).get(asset_id, [])
+        finally:
+            db.close()
+
+        for card in self._all_cards:
+            if card.asset_data.get("id") == asset_id:
+                card.refreshData(asset, asset_id in fav_ids, versions, filetypes)
+                if self.inspector.isVisible() and self._selected_card is card:
+                    self.inspector.setAsset(asset, versions)
+                break
 
     # ------------------------------------------------------------------
     # Filtering & display
@@ -382,6 +411,31 @@ class LibraryBrowser(QMainWindow):
         if author_values:
             filtered = [c for c in filtered
                         if c.asset_data.get("author", "") in author_values]
+
+        polycount_values = fs.get("polycount") or set()
+        if polycount_values:
+            _PC_RANGES = {
+                "< 10k":        (0,       10_000),
+                "10k – 50k":    (10_000,  50_000),
+                "50k – 200k":   (50_000,  200_000),
+                "200k – 500k":  (200_000, 500_000),
+                "500k+":        (500_000, None),
+            }
+            def _pc_match(asset_data, ranges):
+                pc = asset_data.get("polycount")
+                if pc is None:
+                    return False
+                pc = int(pc)
+                for label in ranges:
+                    lo, hi = _PC_RANGES.get(label, (None, None))
+                    if lo is None:
+                        continue
+                    if hi is None and pc >= lo:
+                        return True
+                    if hi is not None and lo <= pc < hi:
+                        return True
+                return False
+            filtered = [c for c in filtered if _pc_match(c.asset_data, polycount_values)]
 
         project_values = fs.get("project") or set()
         if project_values:
@@ -487,6 +541,44 @@ class LibraryBrowser(QMainWindow):
         self.sidebar.setCounts(counts)
         if self._special == "recent":
             self._applyFilters()
+
+    def _onLoadInHoudini(self, load_data, mode):
+        try:
+            import hou
+        except ImportError:
+            from qtpy.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Not in Houdini",
+                                "This action requires running inside Houdini.")
+            return
+
+        filepath = load_data.get("filepath", "")
+        if not filepath or not os.path.isfile(filepath):
+            from qtpy.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "File Not Found",
+                                "Asset file not found:\n%s" % filepath)
+            return
+
+        try:
+            from core.dcc_bridge import HoudiniBridge
+            lib_root = self.plugin._getAssetLibRoot() if self.plugin else ""
+            db = self._getDB()
+            db_path = db.db_path if db else ""
+            if db:
+                db.close()
+            bridge = HoudiniBridge(lib_root, db_path)
+            geo = bridge.import_asset(
+                filepath    = filepath,
+                version_dir = load_data.get("version_dir", ""),
+                asset_name  = load_data.get("name", "asset"),
+                mode        = mode,
+            )
+            hou.ui.displayMessage(
+                "Loaded %s at %s" % (load_data.get("name", ""), geo.path()),
+                severity=hou.severityType.Message,
+            )
+        except Exception as exc:
+            from qtpy.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "Load Failed", str(exc))
 
     def _onCardClicked(self, asset_data):
         try:
@@ -1420,8 +1512,9 @@ class _FilterBar(QWidget):
     _DEFS = [
         ("dcc",      "All DCCs",      ["Houdini exclusive", "Maya exclusive"]),
         ("type",     "All Types",     ["Materials", "Models", "HDAs", "HDRIs / Light rigs", "Textures"]),
-        ("filetype", "All Files",     [".usd", ".rs", ".mtlx", ".abc", ".hda", ".exr", ".hdr", ".hip", ".ma"]),
+        ("filetype", "All Files",     [".usd", ".rs", ".mtlx", ".abc", ".bgeo.sc", ".fbx", ".obj", ".hda", ".exr", ".hdr", ".hip", ".ma"]),
         ("includes", "Includes",      ["Rig", "Textures", "Materials"]),
+        ("polycount", "Any Size",     ["< 10k", "10k – 50k", "50k – 200k", "200k – 500k", "500k+"]),
         ("author",   "All Authors",   []),
     ]
 

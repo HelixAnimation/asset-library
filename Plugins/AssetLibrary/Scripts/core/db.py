@@ -84,6 +84,11 @@ _MIGRATION_V4 = """
 ALTER TABLE assets ADD COLUMN omitted INTEGER NOT NULL DEFAULT 0;
 """
 
+# Migration to v6: adds polycount
+_MIGRATION_V6 = """
+ALTER TABLE assets ADD COLUMN polycount INTEGER;
+"""
+
 # Migration to v5: adds version-level columns to versions table
 _MIGRATION_V5 = """
 ALTER TABLE versions ADD COLUMN renderer       TEXT NOT NULL DEFAULT 'Any';
@@ -167,6 +172,11 @@ class AssetDB:
         if current < 5:
             self.conn.executescript(_MIGRATION_V5)
             self.conn.execute("UPDATE schema_version SET version = 5")
+            self.conn.commit()
+
+        if current < 6:
+            self.conn.executescript(_MIGRATION_V6)
+            self.conn.execute("UPDATE schema_version SET version = 6")
             self.conn.commit()
 
     # ------------------------------------------------------------------
@@ -262,7 +272,7 @@ class AssetDB:
             "name", "category", "subcategory", "filepath", "filetype",
             "renderer", "dcc", "has_rig", "has_textures", "has_materials",
             "version", "author", "thumbnail_path", "prism_path", "project",
-            "created_at", "updated_at",
+            "polycount", "created_at", "updated_at",
         ]
         values = [data.get(c) for c in cols]
         placeholders = ",".join("?" * len(cols))

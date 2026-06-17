@@ -27,6 +27,7 @@ class ImportResult:
     success: bool
     asset_id: int = -1
     nas_path: str = ""
+    version_dir: str = ""
     error: str = ""
     error_type: str = ""
 
@@ -106,7 +107,7 @@ class AssetImporter:
 
         prism_path = self.build_prism_path(data)
         filetype = data.get("filetype") or (
-            os.path.splitext(data["filepaths"][0])[1].lower()
+            self._filetype_for_path(data["filepaths"][0])
             if data.get("filepaths") else ""
         )
 
@@ -142,6 +143,10 @@ class AssetImporter:
             return ImportResult(False, error="Copy failed: %s" % exc, error_type="copy")
 
         primary_rel = self._rel(copied[0]) if copied else ""
+        copied_entries = [
+            (path, self._rel(path), self._filetype_for_path(path))
+            for path in copied
+        ]
 
         # 2. Thumbnails — stored inside the version folder
         thumb_rel = self._handle_thumbnails(version_dir, data["name"], thumbnails or {})
@@ -155,7 +160,7 @@ class AssetImporter:
         try:
             if asset_id:
                 # Update asset's version-level columns to reflect new version
-                self.db.update_asset(asset_id, {
+                update = {
                     "filepath": primary_rel,
                     "filetype": filetype,
                     "version": version,
@@ -165,7 +170,10 @@ class AssetImporter:
                     "has_rig": int(data.get("has_rig", 0)),
                     "has_textures": int(data.get("has_textures", 0)),
                     "has_materials": int(data.get("has_materials", 0)),
-                })
+                }
+                if data.get("polycount") is not None:
+                    update["polycount"] = int(data["polycount"])
+                self.db.update_asset(asset_id, update)
             else:
                 asset_data = {k: v for k, v in data.items() if not k.startswith("_")}
                 asset_data["filepath"] = primary_rel
@@ -177,22 +185,23 @@ class AssetImporter:
                     asset_data["thumbnail_path"] = thumb_rel
                 asset_id = self.db.add_asset(asset_data)
 
-            # Write version row with full version-level metadata
-            self.db.upsert_version(
-                asset_id, version, primary_rel, filetype, prism_path,
-                renderer=data.get("renderer"),
-                dcc=data.get("dcc"),
-                has_rig=data.get("has_rig", 0),
-                has_textures=data.get("has_textures", 0),
-                has_materials=data.get("has_materials", 0),
-                thumbnail_path=thumb_rel,
-            )
+            # Write one version row per exported file type.
+            for _abs_path, rel_path, version_filetype in copied_entries:
+                self.db.upsert_version(
+                    asset_id, version, rel_path, version_filetype, prism_path,
+                    renderer=data.get("renderer"),
+                    dcc=data.get("dcc"),
+                    has_rig=data.get("has_rig", 0),
+                    has_textures=data.get("has_textures", 0),
+                    has_materials=data.get("has_materials", 0),
+                    thumbnail_path=thumb_rel,
+                )
             if data.get("tags"):
                 self.db.set_asset_tags(asset_id, data["tags"])
         except sqlite3.Error as exc:
             return ImportResult(False, error="DB error: %s" % exc, error_type="db")
 
-        return ImportResult(True, asset_id=asset_id, nas_path=primary_rel)
+        return ImportResult(True, asset_id=asset_id, nas_path=primary_rel, version_dir=version_dir)
 
     # ------------------------------------------------------------------
     # File helpers
@@ -207,44 +216,22 @@ class AssetImporter:
         shutil.copy2(src, dest)
         return dest
 
+    def _filetype_for_path(self, path):
+        name = os.path.basename(path).lower()
+        if name.endswith(".bgeo.sc"):
+            return ".bgeo.sc"
+        return os.path.splitext(name)[1].lower()
+
     def _handle_thumbnails(self, version_dir, name, thumbnails):
-        """Copy thumbnails into version_dir/thumbs/. Returns relative path to thumbs dir."""
+        """Ensure version_dir/thumbs/ exists and return its relative path.
+
+        Houdini publishes render turntable frames directly into this directory
+        via the AssetPublisher ROPs. Do not create static material.png/clay.png
+        files here; the browser scans the directory for material/clay/wire
+        frame images.
+        """
         thumbs_dir = os.path.join(version_dir, "thumbs")
         os.makedirs(thumbs_dir, exist_ok=True)
-        has_any = False
-
-        # Material / main images
-        material = thumbnails.get("material") or []
-        for i, src in enumerate(material):
-            if os.path.isfile(src):
-                fname = "material.png" if len(material) == 1 else "material_%02d.png" % (i + 1)
-                try:
-                    shutil.copy2(src, os.path.join(thumbs_dir, fname))
-                    has_any = True
-                except OSError:
-                    pass
-
-        # Clay
-        clay = thumbnails.get("clay") or []
-        if clay and os.path.isfile(clay[0]):
-            try:
-                shutil.copy2(clay[0], os.path.join(thumbs_dir, "clay.png"))
-                has_any = True
-            except OSError:
-                pass
-
-        # Wire
-        wire = thumbnails.get("wire") or []
-        if wire and os.path.isfile(wire[0]):
-            try:
-                shutil.copy2(wire[0], os.path.join(thumbs_dir, "wire.png"))
-                has_any = True
-            except OSError:
-                pass
-
-        if not has_any:
-            self._generate_placeholder(os.path.join(thumbs_dir, "material.png"), name)
-
         return self._rel(thumbs_dir)
 
     def _copy_textures(self, version_dir, texture_files):

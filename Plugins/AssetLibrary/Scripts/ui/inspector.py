@@ -328,6 +328,9 @@ class InspectorPreview(QWidget):
 
     closeClicked = Signal()
 
+    _DRAG_THRESHOLD = 4
+    _SCRUB_PX       = 6
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedSize(_PREVIEW_SIZE, _PREVIEW_SIZE)
@@ -336,8 +339,13 @@ class InspectorPreview(QWidget):
         self._current_view = "material"
         self._view_thumbs = {"material": [], "clay": [], "wire": []}
         self._current_idx = 0
+        self._wire_overlay = False
         self._hover = False
         self._view_mode = "2d"
+        self._scrub_start  = None
+        self._scrub_x      = None
+        self._scrub_accum  = 0
+        self._is_scrubbing = False
         self.setAttribute(Qt.WA_StyledBackground, False)
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.StrongFocus)
@@ -363,6 +371,11 @@ class InspectorPreview(QWidget):
         self.mode_btn = _ModeBtn(self, width=34, height=22, font_size=12)
         self.mode_btn.clicked.connect(self._toggleViewMode)
         self.mode_btn.hide()
+
+        # Wire overlay toggle — top-right, below close button
+        self._wire_btn = _WireBtn(self, size=22)
+        self._wire_btn.hide()
+        self._wire_btn.clicked.connect(self._onWireOverlayToggle)
 
         # Counter
         self.counter = _InspCounter(self)
@@ -407,11 +420,17 @@ class InspectorPreview(QWidget):
         # Close — top-right
         self.close_btn.move(s - self.close_btn.width() - 6, 6)
 
+        # Wire overlay — top-right, below close button
+        self._wire_btn.move(s - self._wire_btn.width() - 6,
+                            self.close_btn.height() + 10)
+
     def setAsset(self, asset_data):
         self._asset_data = asset_data
         self.setViewMode("2d")
         self._current_view = "material"
         self._current_idx = 0
+        self._wire_overlay = False
+        self._wire_btn.setActive(False)
         self._scanThumbs()
         self._showThumb()
         self._updateDotStyles()
@@ -472,12 +491,16 @@ class InspectorPreview(QWidget):
     def _onDot(self, view):
         if not self._view_thumbs.get(view):
             return
+        if view == "wire" and self._wire_overlay:
+            self._wire_overlay = False
+            self._wire_btn.setActive(False)
         self._current_view = view
         self._current_idx = 0
         self._showThumb()
         self._updateDotStyles()
         self._refreshArrows()
         self._refreshCounter()
+        self._refreshWireBtn()
 
     def _refreshArrows(self):
         if self._view_mode != "2d":
@@ -513,11 +536,25 @@ class InspectorPreview(QWidget):
             active = (view == self._current_view) and has
             dot.setState(view, active, has)
 
+    def _onWireOverlayToggle(self):
+        self._wire_overlay = not self._wire_overlay
+        self._wire_btn.setActive(self._wire_overlay)
+        self.update()
+
+    def _refreshWireBtn(self):
+        has_wire = bool(self._view_thumbs.get("wire"))
+        if self._hover and has_wire and self._current_view != "wire" and self._view_mode == "2d":
+            self._wire_btn.show()
+            self._wire_btn.raise_()
+        else:
+            self._wire_btn.hide()
+
     def _onFullscreen(self):
         if not any(self._view_thumbs.values()):
             return
         self._fs_dlg = FullscreenPreviewDialog(
-            self._view_thumbs, self._current_view, self._current_idx
+            self._view_thumbs, self._current_view, self._current_idx,
+            wire_overlay=self._wire_overlay,
         )
         self._fs_dlg.imageChanged.connect(self._onFullscreenChanged)
         self._fs_dlg.showFullScreen()
@@ -576,6 +613,7 @@ class InspectorPreview(QWidget):
                     dot.show()
         self._refreshArrows()
         self._refreshCounter()
+        self._refreshWireBtn()
         if self._view_mode == "2d":
             self.fs_btn.show()
             self.fs_btn.raise_()
@@ -593,7 +631,46 @@ class InspectorPreview(QWidget):
         self.fs_btn.hide()
         self.mode_btn.hide()
         self.close_btn.hide()
+        self._wire_btn.hide()
         self.clearFocus()
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            self._scrub_start  = e.x()
+            self._scrub_x      = e.x()
+            self._scrub_accum  = 0
+            self._is_scrubbing = False
+            e.accept()
+        else:
+            super().mousePressEvent(e)
+
+    def mouseMoveEvent(self, e):
+        if self._scrub_start is not None and (e.buttons() & Qt.LeftButton):
+            images = self._view_thumbs.get(self._current_view, [])
+            if len(images) > 1:
+                if not self._is_scrubbing and abs(e.x() - self._scrub_start) >= self._DRAG_THRESHOLD:
+                    self._is_scrubbing = True
+                if self._is_scrubbing:
+                    dx = e.x() - self._scrub_x
+                    self._scrub_x      = e.x()
+                    self._scrub_accum += dx
+                    frames = self._scrub_accum // self._SCRUB_PX
+                    if frames:
+                        self._scrub_accum -= frames * self._SCRUB_PX
+                        self._current_idx = (self._current_idx + frames) % len(images)
+                        self._showThumb()
+                        self._refreshCounter()
+            e.accept()
+        else:
+            super().mouseMoveEvent(e)
+
+    def mouseReleaseEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            self._scrub_start  = None
+            self._is_scrubbing = False
+            e.accept()
+        else:
+            super().mouseReleaseEvent(e)
 
     def keyPressEvent(self, e):
         key = e.key()
@@ -632,6 +709,22 @@ class InspectorPreview(QWidget):
             x = (int(r.width()) - scaled.width()) // 2
             y = (int(r.height()) - scaled.height()) // 2
             p.drawPixmap(x, y, scaled)
+
+            if self._wire_overlay:
+                wire_images = self._view_thumbs.get("wire", [])
+                if wire_images:
+                    widx = min(self._current_idx, len(wire_images) - 1)
+                    wire_px = QPixmap(wire_images[widx])
+                    if not wire_px.isNull():
+                        wire_scaled = wire_px.scaled(
+                            int(r.width()), int(r.height()),
+                            Qt.KeepAspectRatio, Qt.SmoothTransformation,
+                        )
+                        wx = (int(r.width())  - wire_scaled.width())  // 2
+                        wy = (int(r.height()) - wire_scaled.height()) // 2
+                        p.setCompositionMode(QPainter.CompositionMode_Multiply)
+                        p.drawPixmap(wx, wy, wire_scaled)
+                        p.setCompositionMode(QPainter.CompositionMode_SourceOver)
         else:
             # Placeholder
             if self._asset_data:
@@ -702,6 +795,54 @@ class _StarBtn(QWidget):
             path.lineTo(ix, iy)
         path.closeSubpath()
         return path
+
+    def enterEvent(self, e):
+        self._hover = True
+        self.update()
+
+    def leaveEvent(self, e):
+        self._hover = False
+        self.update()
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            self.clicked.emit()
+        e.accept()
+
+
+class _WireBtn(QWidget):
+    """Wire overlay toggle pill — '#' symbol, active = ACCENT colour.
+    Used in both the inspector preview (size≈22) and fullscreen (size≈38)."""
+    clicked = Signal()
+
+    def __init__(self, parent=None, size=22):
+        super().__init__(parent)
+        self._active = False
+        self._hover  = False
+        self.setFixedSize(max(24, int(size * 1.3)), max(20, size))
+        self._font_size = max(10, int(size * 0.52))
+        self.setCursor(Qt.PointingHandCursor)
+        self.setAttribute(Qt.WA_NoSystemBackground)
+
+    def setActive(self, active):
+        self._active = active
+        self.update()
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setPen(Qt.NoPen)
+        if self._active:
+            p.setBrush(QColor(ACCENT))
+        else:
+            p.setBrush(QColor(0, 0, 0, 130 if self._hover else 85))
+        p.drawRoundedRect(QRectF(self.rect()), 4, 4)
+        p.setPen(QColor(255, 255, 255, 230 if self._active else 170))
+        font = p.font()
+        font.setPixelSize(self._font_size)
+        font.setBold(True)
+        p.setFont(font)
+        p.drawText(QRectF(self.rect()), Qt.AlignCenter, "#")
 
     def enterEvent(self, e):
         self._hover = True
@@ -914,11 +1055,12 @@ class FullscreenPreviewDialog(QDialog):
     _ZOOM_MAX = 12.0
     _ZOOM_STEP = 1.15
 
-    def __init__(self, view_thumbs, current_view, current_idx=0, parent=None):
+    def __init__(self, view_thumbs, current_view, current_idx=0, wire_overlay=False, parent=None):
         super().__init__(parent, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self._view_thumbs = view_thumbs
         self._current_view = current_view
         self._current_idx = current_idx
+        self._wire_overlay = wire_overlay
         self._view_mode = "2d"
         self.setAttribute(Qt.WA_DeleteOnClose)
         self.setStyleSheet("background: #1a1a1a;")
@@ -930,6 +1072,10 @@ class FullscreenPreviewDialog(QDialog):
         self._panning = False
         self._pan_start = None
         self._pan_offset_start = (0.0, 0.0)
+        self._scrub_start  = None
+        self._scrub_x      = None
+        self._scrub_accum  = 0
+        self._is_scrubbing = False
         self._loadImage()
         self._buildOverlays()
 
@@ -962,9 +1108,14 @@ class FullscreenPreviewDialog(QDialog):
         self._close_btn = _FsCloseBtn(self)
         self._close_btn.clicked.connect(self.close)
 
+        self._wire_btn = _WireBtn(self, size=38)
+        self._wire_btn.setActive(self._wire_overlay)
+        self._wire_btn.clicked.connect(self._onWireOverlayToggle)
+
         self._updateDotStyles()
         self._refreshCounter()
         self._refreshArrows()
+        self._refreshWireBtn()
 
     def _positionOverlays(self):
         w, h = self.width(), self.height()
@@ -989,8 +1140,11 @@ class FullscreenPreviewDialog(QDialog):
         self._counter.adjustSize()
         self._counter.move(24, h - self._counter.height() - 24)
 
+        # Wire overlay toggle — top-left
+        self._wire_btn.move(24, 16)
+
         for w_ in (self._arrow_left, self._arrow_right, self._counter, self._close_btn,
-                   self._mode_btn):
+                   self._mode_btn, self._wire_btn):
             w_.raise_()
         for dot in self._dots.values():
             dot.raise_()
@@ -1037,6 +1191,9 @@ class FullscreenPreviewDialog(QDialog):
     def _onDot(self, view):
         if not self._view_thumbs.get(view):
             return
+        if view == "wire" and self._wire_overlay:
+            self._wire_overlay = False
+            self._wire_btn.setActive(False)
         self._current_view = view
         self._current_idx = 0
         self._loadImage()
@@ -1044,6 +1201,7 @@ class FullscreenPreviewDialog(QDialog):
         self._updateDotStyles()
         self._refreshArrows()
         self._refreshCounter()
+        self._refreshWireBtn()
         self.imageChanged.emit(self._current_view, self._current_idx)
         self.update()
 
@@ -1085,6 +1243,7 @@ class FullscreenPreviewDialog(QDialog):
         self._resetView()
         self._refreshArrows()
         self._refreshCounter()
+        self._refreshWireBtn()
         self.update()
 
     # ── Zoom / pan helpers ─────────────────────────────────────────────────
@@ -1119,6 +1278,28 @@ class FullscreenPreviewDialog(QDialog):
             scaled = self._orig_px.scaled(dw, dh, Qt.IgnoreAspectRatio,
                                           Qt.SmoothTransformation)
             p.drawPixmap(x, y, scaled)
+
+            if self._wire_overlay:
+                wire_images = self._view_thumbs.get("wire", [])
+                if wire_images:
+                    widx = min(self._current_idx, len(wire_images) - 1)
+                    wire_px = QPixmap(wire_images[widx])
+                    if not wire_px.isNull():
+                        wire_scaled = wire_px.scaled(dw, dh, Qt.IgnoreAspectRatio,
+                                                     Qt.SmoothTransformation)
+                        p.setCompositionMode(QPainter.CompositionMode_Multiply)
+                        p.drawPixmap(x, y, wire_scaled)
+                        p.setCompositionMode(QPainter.CompositionMode_SourceOver)
+
+    def _onWireOverlayToggle(self):
+        self._wire_overlay = not self._wire_overlay
+        self._wire_btn.setActive(self._wire_overlay)
+        self.update()
+
+    def _refreshWireBtn(self):
+        has_wire = bool(self._view_thumbs.get("wire"))
+        self._wire_btn.setVisible(has_wire and self._current_view != "wire"
+                                  and self._view_mode == "2d")
 
     def _drawCubePlaceholder(self, p):
         w, h = self.width(), self.height()
@@ -1158,7 +1339,13 @@ class FullscreenPreviewDialog(QDialog):
         e.accept()
 
     def mousePressEvent(self, e):
-        if e.button() == Qt.MiddleButton:
+        if e.button() == Qt.LeftButton and self.childAt(e.pos()) is None:
+            self._scrub_start  = e.x()
+            self._scrub_x      = e.x()
+            self._scrub_accum  = 0
+            self._is_scrubbing = False
+            e.accept()
+        elif e.button() == Qt.MiddleButton:
             self._panning = True
             self._pan_start = e.pos()
             self._pan_offset_start = (self._pan_x, self._pan_y)
@@ -1166,14 +1353,35 @@ class FullscreenPreviewDialog(QDialog):
             e.accept()
 
     def mouseMoveEvent(self, e):
-        if self._panning and self._pan_start is not None:
+        if self._scrub_start is not None and (e.buttons() & Qt.LeftButton):
+            images = self._view_thumbs.get(self._current_view, [])
+            if len(images) > 1:
+                if not self._is_scrubbing and abs(e.x() - self._scrub_start) >= 4:
+                    self._is_scrubbing = True
+                if self._is_scrubbing:
+                    dx = e.x() - self._scrub_x
+                    self._scrub_x      = e.x()
+                    self._scrub_accum += dx
+                    frames = self._scrub_accum // 6
+                    if frames:
+                        self._scrub_accum -= frames * 6
+                        self._current_idx = (self._current_idx + frames) % len(images)
+                        self._loadImage()
+                        self._resetView()
+                        self._refreshCounter()
+                        self.imageChanged.emit(self._current_view, self._current_idx)
+                        self.update()
+        elif self._panning and self._pan_start is not None:
             d = e.pos() - self._pan_start
             self._pan_x = self._pan_offset_start[0] + d.x()
             self._pan_y = self._pan_offset_start[1] + d.y()
             self.update()
 
     def mouseReleaseEvent(self, e):
-        if e.button() == Qt.MiddleButton:
+        if e.button() == Qt.LeftButton:
+            self._scrub_start  = None
+            self._is_scrubbing = False
+        elif e.button() == Qt.MiddleButton:
             self._panning = False
             self.unsetCursor()
 
@@ -1250,6 +1458,16 @@ class _MetadataSection(QWidget):
         # DCC
         dcc = _text(d.get("dcc"), "Universal") or "Universal"
         self._rows.addWidget(self._kv("DCC", dcc))
+
+        # Polycount
+        polycount = d.get("polycount")
+        if polycount is not None and int(polycount) > 0:
+            n = int(polycount)
+            if n >= 1_000_000:
+                pc_str = "%.1fM polys" % (n / 1_000_000)
+            else:
+                pc_str = "{:,} polys".format(n)
+            self._rows.addWidget(self._kv("Polycount", pc_str))
 
         # Author
         author = _text(d.get("author"))
