@@ -157,13 +157,16 @@ class Prism_AssetLibrary_Functions(object):
                 if base.startswith("object_AssetPublisher.") and base.endswith(".hda"):
                     if norm not in canonical:
                         try:
-                            hou.hda.uninstallFile(norm)
+                            # Remove from oplibraries so it won't reappear next startup
+                            hou.hda.uninstallFile(norm, change_oplibraries_file=True)
                         except Exception:
                             pass
             loaded = {f.replace("\\", "/") for f in hou.hda.loadedFiles()}
             for hda_path in hda_files:
                 if hda_path.replace("\\", "/") not in loaded:
-                    hou.hda.installFile(hda_path)
+                    # Session-only load — don't write to oplibraries; the startup
+                    # callback always loads it fresh from pluginDirectory/Houdini/otls/.
+                    hou.hda.installFile(hda_path, change_oplibraries_file=False)
         except Exception as exc:
             logger.warning("Could not install Asset Publisher HDA: %s", exc)
 
