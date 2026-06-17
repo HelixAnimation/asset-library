@@ -18,10 +18,10 @@ import hou
 import shutil
 import os
 
-HDA_PATH     = r"Z:\Users\Dimitar\Claude\Projects\Asset_Library\Plugins\AssetLibrary\HDA\object_AssetPublisher.1.3.hda"
+HDA_PATH     = r"Z:\Users\Dimitar\Claude\Projects\Asset_Library\Plugins\AssetLibrary\HDA\object_AssetPublisher.2.0.hda"
 HDA_PATH_SRC = r"Z:\Users\Dimitar\Claude\Projects\Asset_Library\Plugins\AssetLibrary\HDA\object_AssetPublisher.1.2.hda"
 TMP_PATH     = r"C:\Temp\ap_rebuild.hda"
-HDA_TYPE     = "AssetPublisher::1.3"
+HDA_TYPE     = "AssetPublisher::2.0"
 HDA_LABEL    = "Asset Publisher"
 
 PYTHON_MODULE = r"""import sys, os
@@ -108,6 +108,91 @@ if not ptg.find("ld_lookat"):
         ptg.insertBefore(_sep_passes, _cam_folder)
     else:
         ptg.append(_cam_folder)
+
+# Pass control parms — read by ROP/SOP expressions (thumb_output_dir / pass_name
+# are set at submit time by submit_turntable_to_deadline).
+if not ptg.find("use_override"):
+    _pass_folder = hou.FolderParmTemplate(
+        "pass_ctrl", "Pass Control",
+        folder_type=hou.folderType.Simple,
+        is_hidden=True,
+    )
+    for _pname, _plabel, _ptype, _pdefault in [
+        ("use_override",    "Use Override",    "int",    0),
+        ("hide_lookdev",    "Hide Lookdev",    "int",    0),
+        ("thumb_output_dir","Thumb Output Dir","string", ""),
+        ("pass_name",       "Pass Name",       "string", "material"),
+        ("override_mat",    "Override Mat",    "string", ""),
+    ]:
+        if _ptype == "int":
+            _pass_folder.addParmTemplate(hou.IntParmTemplate(_pname, _plabel, 1, default_value=(_pdefault,)))
+        else:
+            _pass_folder.addParmTemplate(hou.StringParmTemplate(_pname, _plabel, 1, default_value=(_pdefault,)))
+    ptg.append(_pass_folder)
+
+# Inject thumb_res into the Camera folder (separate guard — survives re-rebuilds)
+if not ptg.find("thumb_res"):
+    _thumb_res = hou.IntParmTemplate(
+        "thumb_res", "Thumbnail Resolution", 1,
+        default_value=(1024,),
+        min=64, max=4096,
+    )
+    _sep_turntable = ptg.find("sep_turntable")
+    if _sep_turntable:
+        ptg.insertBefore(_sep_turntable, _thumb_res)
+    else:
+        _ld_focal = ptg.find("ld_focal")
+        if _ld_focal:
+            ptg.insertAfter(_ld_focal, _thumb_res)
+        else:
+            ptg.append(_thumb_res)
+
+# Deadline farm controls — priority + frames-per-task for turntable submission
+if not ptg.find("deadline_priority"):
+    _dl_folder = hou.FolderParmTemplate(
+        "deadline_ctrl", "Deadline",
+        folder_type=hou.folderType.Simple,
+    )
+    _dl_folder.addParmTemplate(hou.IntParmTemplate(
+        "deadline_priority", "Priority", 1,
+        default_value=(5,),
+        min=0, max=100,
+    ))
+    _dl_folder.addParmTemplate(hou.IntParmTemplate(
+        "deadline_frames_per_task", "Frames Per Task", 1,
+        default_value=(6,),
+        min=1, max=72,
+    ))
+    _cam = ptg.find("ld_cam")
+    if _cam:
+        ptg.insertAfter(_cam, _dl_folder)
+    else:
+        ptg.append(_dl_folder)
+
+# Multi-format export toggles. Keep the old export_format menu for backwards
+# compatibility, but new publishes use these toggles when any are enabled.
+if not ptg.find("export_abc"):
+    _export_folder = hou.FolderParmTemplate(
+        "export_formats", "Export Formats",
+        folder_type=hou.folderType.Simple,
+    )
+    for _pname, _plabel, _default in [
+        ("export_usd",  "USD",  0),
+        ("export_abc",  "Alembic", 1),
+        ("export_bgeo", "BGEO", 0),
+        ("export_fbx",  "FBX", 0),
+        ("export_obj",  "OBJ", 0),
+        ("export_hda",  "HDA", 0),
+        ("export_hip",  "HIP", 0),
+    ]:
+        _export_folder.addParmTemplate(
+            hou.ToggleParmTemplate(_pname, _plabel, default_value=_default)
+        )
+    _old_export_format = ptg.find("export_format")
+    if _old_export_format:
+        ptg.insertAfter(_old_export_format, _export_folder)
+    else:
+        ptg.append(_export_folder)
 
 # Replace asset_name plain string with a dynamic menu + "+" button (idempotent)
 if not ptg.find("new_asset_name"):
@@ -214,8 +299,7 @@ try:
     # Resolve source_node parm (may be relative path like ../box1) to absolute.
     # From objectmerge1, '../..' navigates to the Asset Publisher node.
     merge.parm("objpath1").setExpression(
-        "(lambda pub: (lambda val: pub.node(val).path() if val and pub.node(val) else '')"
-        "(pub.parm('source_node').evalAsString()))(hou.node('../..'))",
+        "n.path() if (n := hou.node('../..').node(hou.node('../..').parm('source_node').evalAsString())) else ''",
         hou.exprLanguage.Python
     )
     merge.parm("xformtype").set(0)  # world-space import
@@ -227,11 +311,32 @@ try:
     xform.setRenderFlag(False)
     merge.setPosition([xform.position()[0], xform.position()[1] + 1.5])
 
+    # Material override SOP — applies clay/wire material when use_override=1
+    mat_sop = preview.createNode("material", "override_mat")
+    mat_sop.parm("shop_materialpath1").setExpression('chs("../../override_mat")', hou.exprLanguage.Hscript)
+    mat_sop.setInput(0, xform)
+    mat_sop.setDisplayFlag(False)
+    mat_sop.setRenderFlag(False)
+    mat_sop.setPosition([xform.position()[0] + 2.5, xform.position()[1]])
+
+    # Switch — input 0: original material, input 1: override material
+    switch = preview.createNode("switch", "pass_switch")
+    switch.parm("input").setExpression('ch("../../use_override")', hou.exprLanguage.Hscript)
+    switch.setInput(0, xform)
+    switch.setInput(1, mat_sop)
+    switch.setDisplayFlag(False)
+    switch.setRenderFlag(False)
+    switch.setPosition([xform.position()[0], xform.position()[1] - 1.5])
+
     out = preview.createNode("null", "OUT")
-    out.setInput(0, xform)
+    out.setInput(0, switch)
     out.setDisplayFlag(True)
     out.setRenderFlag(True)
-    out.setPosition([xform.position()[0], xform.position()[1] - 1.5])
+    out.setPosition([xform.position()[0], xform.position()[1] - 3.0])
+
+    # Displacement + tessellation off for clay/wire passes (driven by use_override)
+    preview.parm("RS_objprop_displace_enable").setExpression('1 - ch("../use_override")', hou.exprLanguage.Hscript)
+    preview.parm("RS_objprop_proxy_ovrTess").setExpression('ch("../use_override")', hou.exprLanguage.Hscript)
 
 
 except Exception as e:
@@ -249,17 +354,75 @@ try:
         "hou.node('../../lookdev_scene/lookdev_camera').path()",
         hou.exprLanguage.Python
     )
-    # Exclude the source geo node from the render
+    # Wire pass hides lookdev_scene (cyclorama); material/clay render everything.
+    # Must return an absolute path — Redshift does not resolve relative paths here.
     rs.parm("RS_objects_exclude").setExpression(
-        "(lambda pub: (lambda val: pub.node(val).path() if val and pub.node(val) else '')"
-        "(pub.parm('source_node').evalAsString()))(hou.node('../..'))",
+        "hou.node('../../lookdev_scene').path() if int(ch('../../hide_lookdev')) else ''",
         hou.exprLanguage.Python
     )
-    # Render at current timeline frame (thumb_frame parm removed)
+    # Output path built from HDA parms — pass_name/thumb_output_dir set at submit time
+    rs.parm("RS_outputFileNamePrefix").setExpression(
+        'chs("../../thumb_output_dir") + "/" + chs("../../pass_name") + "_tmp"',
+        hou.exprLanguage.Hscript
+    )
+    # Render at current timeline frame
     for _fp in ("f1", "f2"):
         rs.parm(_fp).setExpression("hou.frame()", hou.exprLanguage.Python)
+    # Override resolution always ON — 1024x1024 default, overridden at render time from thumb_res
+    try:
+        rs.parm("RS_overrideCameraRes").set(1)
+        rs.parm("RS_overrideRes1").set(1024)
+        rs.parm("RS_overrideRes2").set(1024)
+    except Exception as e:
+        print("  Warning — RS_overrideRes:", e)
 except Exception as e:
     print("  Warning — ropnet setup:", e)
+
+# ------------------------------------------------------------------
+# 4d. Embed thumb_mats — clay and wire materials for pass overrides
+# ------------------------------------------------------------------
+print("Creating embedded thumb_mats...")
+try:
+    mats = subnet.createNode("matnet", "thumb_mats")
+
+    # clay_mat — warm grey RS Standard Material, no displacement
+    clay_net = mats.createNode("redshift_vopnet", "clay_mat")
+    clay = clay_net.createNode("redshift::StandardMaterial", "clay_std")
+    clay.parm("base_colorr").set(0.75)
+    clay.parm("base_colorg").set(0.72)
+    clay.parm("base_colorb").set(0.68)
+    clay.parm("refl_roughness").set(0.9)
+    clay.parm("refl_ior").set(1.45)
+    clay_out = clay_net.createNode("redshift_material", "redshift_material1")
+    clay_out.setInput(0, clay, 0)
+    clay_net.layoutChildren()
+
+    # wire_mat — black base + white emission + WireFrame VOP
+    wire_net = mats.createNode("redshift_vopnet", "wire_mat")
+    wire = wire_net.createNode("redshift::StandardMaterial", "wire_std")
+    for _ch in ("r", "g", "b"):
+        wire.parm("base_color%s" % _ch).set(0.0)
+    wire.parm("emission_weight").set(1.0)
+    wire.parm("emission_colorr").set(1.0)
+    wire.parm("emission_colorg").set(1.0)
+    wire.parm("emission_colorb").set(1.0)
+    try:
+        wire_tex = wire_net.createNode("redshift::WireFrame", "wire_tex")
+        wire.setInput(wire.inputIndex("emission_color"), wire_tex, 0)
+    except Exception as _e:
+        print("  Warning — WireFrame VOP:", _e)
+    wire_out = wire_net.createNode("redshift_material", "redshift_material1")
+    wire_out.setInput(0, wire, 0)
+    wire_net.layoutChildren()
+
+except Exception as e:
+    print("  Warning — thumb_mats setup:", e)
+
+# ------------------------------------------------------------------
+# 4e. (Removed) TOPs topnet1 / pass_wedge — turntable now runs via the
+#     per-HIP Deadline submission (submit_turntable_to_deadline). The live
+#     HDA also has its topnet1 deleted; this block is left as a breadcrumb.
+# ------------------------------------------------------------------
 
 # ------------------------------------------------------------------
 # 5. Convert subnet to HDA (no spare parms yet — add them to definition after)
@@ -326,7 +489,7 @@ except Exception:
 # Also uninstall backups that share the same type name (prevent conflicts)
 import glob as _glob
 backup_dir = os.path.dirname(HDA_PATH) + r"\backup"
-for bak in _glob.glob(backup_dir + r"\object_AssetPublisher.1.3*.hda"):
+for bak in _glob.glob(backup_dir + r"\object_AssetPublisher.2.0*.hda"):
     try:
         hou.hda.uninstallFile(bak.replace("\\", "/"), change_oplibraries_file=False)
     except Exception:

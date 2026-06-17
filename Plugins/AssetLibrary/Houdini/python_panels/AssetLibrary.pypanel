@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<pythonPanelDocument>
+  <interface name="AssetLibrary" label="Asset Library" icon="MISC_python" help_url="">
+    <script><![CDATA[
+def onCreateInterface():
+    plugin = None
+    try:
+        import PrismInit
+        plugin = PrismInit.pcore.plugins.getPlugin("AssetLibrary")
+    except Exception:
+        pass
+
+    from ui.library_browser import LibraryBrowser
+    core = getattr(plugin, "core", None) if plugin else None
+    return LibraryBrowser(core, plugin=plugin)
+    ]]></script>
+    <includeInPaneTabMenu menu_position="0" create_separator="false"/>
+  </interface>
+</pythonPanelDocument>

@@ -217,9 +217,9 @@ A finalized HTML mockup (`index.html`) exists and should be used as the visual s
 
 ### Phase 5 — DCC integration 🔶
 16. ⬜ **Drag and drop import** — drag card into Houdini or Maya viewport via `core/dcc_bridge.py`
-17. ⬜ **Houdini bridge** — import/reference asset, set up for rendering, launch usdview
+17. ✅ **Houdini bridge — Load in Houdini** — right-click asset card → "Load in Houdini" / "Reference in Houdini"; creates geo node with alembic SOP (loadmode=unpack), local matnet inside the geo node, RS material networks reconstructed from materials.json (redshift_vopnet hierarchy + all child nodes + connections + tuple parms), wrangle remaps shop_materialpath to local matnet paths; shelf tool installed at houdini20.5/toolbar/AssetLibrary.shelf
 18. ⬜ **Maya bridge** — `maya.cmds` equivalent for import/reference and render setup
-19. 🔶 **Thumbnail render pipeline** — Asset Publisher HDA built and wired; geometry export + publish untested end-to-end
+19. ✅ **Thumbnail render pipeline + geometry export** — Asset Publisher HDA fully wired; node-based multi-format export (rop_abc/rop_bgeo/rop_fbx/rop_usd inside asset_Main), joined toggle strip in HDA UI, ROPs write directly to NAS, importer handles DB registration; Deadline turntable submission via Prism; end-to-end publish tested and working
 
 ### Phase 6 — 3D view & USD ⬜
 19. ⬜ **View USD** — launch usdview (or Houdini/Maya USD viewer)
@@ -249,55 +249,68 @@ Hard-won fixes to avoid re-breaking:
 
 ## Houdini Asset Publisher HDA
 
-Lives at `Plugins/AssetLibrary/HDA/object_AssetPublisher.1.2.hda`.
-Rebuilt by running `HDA/build_hda.py` in Houdini's Python shell.
-Type name: `AssetPublisher::1.2` (Object context subnet).
+**Live HDA (what artists get):** `Plugins/AssetLibrary/Houdini/otls/object_AssetPublisher.2.0.hda` — auto-installed on Houdini startup by `_installHoudiniHDA()` in `Prism_AssetLibrary_Functions.py` via a version-agnostic glob (`object_AssetPublisher.*.hda`). Type name: `AssetPublisher::2.0` (Object context subnet). Both `1.3.hda` and `2.0.hda` are kept in `otls/`: 2.0 is current (new Tab-menu nodes pick the highest version); 1.3 is retained so legacy `::1.3` scenes still resolve.
+
+### Editing workflow — direct on the HDA, NOT via build_hda.py
+We iterate **directly on the live HDA** (`Houdini/otls/...`), either:
+- **Manually** in Houdini's Type Properties → **Save Node Type** (writes back to `Houdini/otls/object_AssetPublisher.2.0.hda`), or
+- **Via the fxhoudini MCP** (parm templates, node wiring, sections) — light setup ops only; **never** renders/cooks/exports through MCP or Houdini crashes.
+
+`HDA/build_hda.py` and `HDA/object_AssetPublisher.1.3.hda` are **reference/legacy only** — kept to document the intended parm set and the original one-shot build. Nothing copies from `HDA/` to `Houdini/otls/`; a build_hda.py run does **not** reach artists. Don't rely on it.
+
+### Python-logic edits need no HDA edit
+The embedded `PythonModule` is a shim that does `import core.houdini_publisher` off `Plugins/AssetLibrary/Scripts`. So edits to `Scripts/core/houdini_publisher.py` (callbacks, publish logic) and `Scripts/core/dcc_bridge.py` take effect on the next node create/load — **no HDA edit, no restart**. Only **parm-template / network / expression** changes require editing the live HDA.
 
 ### Internal network structure
 ```
 /obj/AssetPublisher/
   ├── lookdev_scene        (lookdev_scene::2.14)
-  │     objpath2 → ../asset_preview   (Python expr, auto-scales cyclorama)
-  │     lookdev_camera     (camera used by rs_thumb ROP)
-  │
-  ├── asset_preview        (geo Object)
-  │     objectmerge1  →  reads source_node parm, resolves to absolute path
-  │     Asset_Transform1   (Asset_Transform::2.2, Select_Transform=AboveGround)
-  │     OUT (null)         ← display/render flag
-  │
+  ├── thumb_mats           (matnet — clay_mat, wire_mat for RS passes)
+  ├── asset_Main           (geo — source geometry + export ROPs)
+  │     objectmerge1  →  reads source_node parm
+  │     Asset_Transform1   (Asset_Transform::2.2, AboveGround)
+  │     timeshift1
+  │     OUT (null)         ← display flag
+  │     export_ready (null) ← fans out to all export ROPs
+  │     rop_abc      (rop_alembic)   — filename = export_base_path + ".abc"
+  │     rop_bgeo     (rop_geometry)  — sopoutput = export_base_path + ".bgeo.sc"
+  │     rop_fbx      (rop_fbx)       — sopoutput = export_base_path + ".fbx"
+  │     rop_usd      (usdexport)     — lopoutput = export_base_path + ".usd"
+  ├── asset_Clay           (geo — clay pass geometry)
+  ├── asset_Wire           (geo — wire pass geometry)
   └── ropnet1
-        rs_thumb           (Redshift_ROP)
-              RS_renderCamera   → lookdev_scene/lookdev_camera  (Python expr)
-              RS_objects_exclude → source_node absolute path    (Python expr)
-              f1 / f2           → thumb_frame parm              (Python expr)
+        rs_thumb / rs_clay / rs_wire  (Redshift_ROPs for turntable passes)
 ```
 
-### Render thumbnail flow
-Artist clicks **Render Thumbnails** in the HDA → `houdini_publisher.render_thumbnails_action(node)` → `HoudiniBridge.render_thumbnails(source, output_dir, lookdev_path, frame, passes)`:
-1. Calls `pub.allowEditingOfContents()` to unlock for parm writes
-2. Finds `ropnet1/rs_thumb` — pre-wired camera + exclude expression, no temp nodes at `/out`
-3. For each enabled pass (material / clay / wire):
-   - Sets `RS_outputFileNamePrefix` on the internal ROP to a temp path
-   - Clay/wire: creates temp RS material in `/mat`, sets `asset_preview.shop_materialpath`
-   - Presses `rop.execute` (runs in Houdini main thread — not via MCP)
-   - Restores `shop_materialpath`, destroys temp material
-4. Returns `{"material": path, "clay": path, "wire": path}`
+### Export flow
+1. Artist sets format toggles (joined strip at top of HDA parms), fills metadata, clicks **Publish**
+2. Python determines next version, builds `version_dir` on NAS, sets hidden `export_base_path` parm
+3. `_execute_export_rops()` calls `rop.render()` on each enabled ROP — ROPs write directly to NAS
+4. Python collects written file paths, calls `bridge.publish()` → importer detects src == dest, skips copy, writes DB only
+5. Deadline turntable jobs submitted via Prism for each enabled render pass
 
-### Key parm-path expressions (all use `hou.node('../..')` to reach AssetPublisher)
-- `objectmerge1.objpath1` — resolves `source_node` relative path to absolute (from geo1 context)
-- `rs_thumb.RS_objects_exclude` — same resolution pattern (from ropnet1/rs_thumb context)
-- `lookdev_scene.objpath2` — `hou.node('../asset_preview').path()`
-- `rs_thumb.RS_renderCamera` — `hou.node('../../lookdev_scene/lookdev_camera').path()`
+### ROP output path expressions (Python, from SOP context inside asset_Main)
+```python
+hou.pwd().parent().parent().parm('export_base_path').evalAsString() + '.abc'
+```
+`hou.pwd()` = the ROP node → `.parent()` = asset_Main → `.parent()` = AssetPublisher
 
-### HDA rebuild notes
-- Always source parms from `object_AssetPublisher.1.1.hda` (stable reference, never overwritten)
-- After rebuilding, uninstall all `AssetPublisher::1.2` conflicts (backups, temp files) — multiple installs with the same type name break the Tab menu
-- `ignore_external_references=True` required on `createDigitalAsset()` due to lookdev_scene internal camera references
+### Turntable Deadline submission
+- Three Redshift ROPs: `ropnet1/rs_thumb` (material), `ropnet1/rs_clay`, `ropnet1/rs_wire`
+- Output paths set to `thumbs_dir/material.$F4` etc. before saving per-pass HIPs
+- HIPs saved to `$ASSET_LIB/_farm_jobs/<asset>/<version>/turntable_<pass>.hip`
+- Submitted via `PrismInit.pcore.plugins.getPlugin("Deadline").submitHoudiniJob()`
+
+### Editing notes (direct-on-HDA workflow)
+- **Save Node Type** (or MCP save) writes back to `Houdini/otls/object_AssetPublisher.2.0.hda` — the current version (both 1.3 and 2.0 ship from `otls/`, but 2.0 is what new nodes use).
+- `ignore_external_references=True` was required when the HDA was originally created via `createDigitalAsset()`, due to lookdev_scene's internal camera references.
+- Export ROPs (`rop_abc` / `rop_bgeo` / `rop_fbx` / `rop_usd` inside `asset_Main`) were added in-scene via MCP and live in the live HDA — they are **not** in `build_hda.py`.
+- Deadline turntable submission exposes `deadline_priority` (default **5**) and `deadline_frames_per_task` (default **6**) in a "Deadline" folder on the live HDA.
+- `HDA/object_AssetPublisher.1.2.hda` is a stable pre-overhaul snapshot — useful as a parm-template reference only.
 
 ---
 
 ## Open questions / deferred decisions
 
-- Thumbnail render → publish flow not yet tested end-to-end (next: test with a real asset)
 - Whether to use Prism's existing publish hooks or intercept earlier in the pipeline
 - Permission enforcement — currently planned at filesystem level (NAS), not in the plugin itself

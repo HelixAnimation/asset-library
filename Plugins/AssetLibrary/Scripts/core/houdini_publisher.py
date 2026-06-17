@@ -9,8 +9,11 @@ automatically when Houdini loads with the AssetLibrary plugin active).
 Button callbacks in the HDA call these functions via hou.phm().<fn>(kwargs).
 """
 
+import logging
 import os
 import sys
+
+logger = logging.getLogger(__name__)
 
 
 # ------------------------------------------------------------------
@@ -389,58 +392,87 @@ def publish_action(node, **kwargs):
 
     bridge = _make_bridge(node)
     data   = _collect_data(node)
-    fmt    = node.parm("export_format").evalAsString().lower()
 
-    # Use a temp directory for exported files; importer copies them to NAS
-    import tempfile
-    tmp_dir = tempfile.mkdtemp(prefix="asset_pub_")
+    # Determine version early so export ROPs write directly to the correct NAS path
+    import os as _os
+    lib_root = node.parm("lib_root").evalAsString().strip()
+    cat  = data["category"]
+    sub  = data.get("subcategory", "") or ""
+    name = data["name"]
+    version = bridge.get_next_version(cat, sub, name)
+    data["version"] = version
 
+    parts = [lib_root, cat] + ([sub] if sub else []) + [name, version]
+    version_dir = _os.path.join(*parts)
+    _os.makedirs(version_dir, exist_ok=True)
+    base_path = _os.path.join(version_dir, name).replace("\\", "/")
+    node.parm("export_base_path").set(base_path)
+
+    # 1. Execute export ROPs — files written directly to NAS version dir
+    exported, export_errors = _execute_export_rops(node)
+    if not exported:
+        hou.ui.displayMessage(
+            "Export failed — no files written.\n\n" + "\n".join(export_errors),
+            severity=hou.severityType.Error,
+            title="Asset Publisher",
+        )
+        return
+
+    # 2. Export textures (optional)
+    texture_files = []
+    if node.parm("export_textures").eval():
+        try:
+            texture_files = bridge.export_textures(source, version_dir)
+        except Exception as exc:
+            hou.ui.displayMessage(
+                "Texture export failed:\n\n%s\n\nContinuing without textures." % exc,
+                severity=hou.severityType.Warning,
+                title="Asset Publisher",
+            )
+
+    # 3. Material manifest — node graph + prim assignments + texture refs
     try:
-        # 1. Export geometry
-        try:
-            exported = bridge.export_geometry(source, tmp_dir, fmt)
-        except Exception as exc:
-            hou.ui.displayMessage(
-                "Export failed:\n\n%s" % exc,
-                severity=hou.severityType.Error,
-                title="Asset Publisher",
-            )
-            return
+        bridge.export_material_manifest(source, version_dir, texture_files)
+    except Exception as exc:
+        logger.warning("Material manifest export failed: %s", exc)
 
-        # 2. Export textures (optional)
-        texture_files = []
-        if node.parm("export_textures").eval():
-            try:
-                texture_files = bridge.export_textures(source, tmp_dir)
-            except Exception as exc:
-                hou.ui.displayMessage(
-                    "Texture export failed:\n\n%s\n\nContinuing without textures." % exc,
-                    severity=hou.severityType.Warning,
-                    title="Asset Publisher",
-                )
+    # 4. Redshift object properties — tessellation, displacement, visibility, etc.
+    try:
+        bridge.export_rs_object_props(source, version_dir)
+    except Exception as exc:
+        logger.warning("RS object props export failed: %s", exc)
 
-        # 3. Use previously rendered thumbnails (or empty dict)
-        thumb_paths = node.cachedUserData("thumb_results") or {}
+    # 5. Polycount — read from asset_Main display SOP (already cooked)
+    try:
+        asset_main = node.node("asset_Main")
+        if asset_main:
+            sop = asset_main.displayNode()
+            if sop:
+                geo = sop.geometry()
+                if geo:
+                    data["polycount"] = int(geo.intrinsicValue("primitivecount"))
+    except Exception as exc:
+        logger.warning("Polycount failed: %s", exc)
 
-        # 4. Publish
-        try:
-            result = bridge.publish(data, exported, thumb_paths, texture_files)
-        except Exception as exc:
-            hou.ui.displayMessage(
-                "Publish failed:\n\n%s" % exc,
-                severity=hou.severityType.Error,
-                title="Asset Publisher",
-            )
-            return
+    # 6. Use previously rendered thumbnails (or empty dict)
+    thumb_paths = node.cachedUserData("thumb_results") or {}
 
-    finally:
-        import shutil
-        shutil.rmtree(tmp_dir, ignore_errors=True)
+    # 7. Publish — files are already on NAS; importer skips copy, just writes DB
+    try:
+        result = bridge.publish(data, exported, thumb_paths, texture_files)
+    except Exception as exc:
+        hou.ui.displayMessage(
+            "Publish failed:\n\n%s" % exc,
+            severity=hou.severityType.Error,
+            title="Asset Publisher",
+        )
+        return
 
     if result.success:
-        _refresh_version_label(node)
+        published_version_dir = getattr(result, "version_dir", "") or ""
 
-        # Submit turntable renders to Deadline
+        # Submit turntable renders to Deadline after preparing the ROPs with the
+        # published version's output path.
         passes_enabled = {
             "material": bool(node.parm("do_material").eval()),
             "clay":     bool(node.parm("do_clay").eval()),
@@ -449,10 +481,28 @@ def publish_action(node, **kwargs):
         deadline_msg = ""
         if any(passes_enabled.values()):
             steps        = node.parm("ld_steps").eval()
+            _dp          = node.parm("deadline_priority")
+            _df          = node.parm("deadline_frames_per_task")
+            dl_priority  = _dp.eval() if _dp else 5
+            dl_fpt       = _df.eval() if _df else 6
             lookdev_path = node.path() + "/lookdev_scene"
             try:
+                import os as _os
+                if published_version_dir:
+                    thumbs_dir = _os.path.join(published_version_dir, "thumbs")
+                else:
+                    lib_root = node.parm("lib_root").evalAsString().strip()
+                    cat  = data["category"]
+                    sub  = data.get("subcategory", "") or ""
+                    name = data["name"]
+                    ver  = getattr(result, "version", "") or "v001"
+                    parts = [lib_root, cat] + ([sub] if sub else []) + [name, ver, "thumbs"]
+                    thumbs_dir = _os.path.join(*parts)
+
+                _prepare_turntable_rops(node, thumbs_dir, passes_enabled)
                 job_ids = bridge.submit_turntable_to_deadline(
-                    source, lookdev_path, steps, passes_enabled, data["name"]
+                    source, lookdev_path, steps, passes_enabled, data["name"], thumbs_dir,
+                    priority=dl_priority, frames_per_task=dl_fpt,
                 )
                 submitted = {k: v for k, v in job_ids.items() if v}
                 if submitted:
@@ -460,9 +510,11 @@ def publish_action(node, **kwargs):
                         "  %s: %s" % (k, v) for k, v in submitted.items()
                     )
                 else:
-                    deadline_msg = "\n\nTurntable submission failed — check Houdini console."
+                    deadline_msg = "\n\nTurntable submission failed - check Houdini console."
             except Exception as exc:
                 deadline_msg = "\n\nTurntable submission failed:\n%s" % exc
+
+        _refresh_version_label(node)
 
         hou.ui.displayMessage(
             "Published successfully!\n\nAsset ID: %d\nPath: %s%s" % (
@@ -484,10 +536,109 @@ def publish_action(node, **kwargs):
 # ------------------------------------------------------------------
 
 def _make_bridge(node):
+    import sys
+    for _k in list(sys.modules):
+        if _k.startswith("core."):
+            del sys.modules[_k]
     from core.dcc_bridge import HoudiniBridge
     lib_root = node.parm("lib_root").evalAsString().strip()
     db_path  = os.path.join(lib_root, "library.db")
     return HoudiniBridge(lib_root, db_path)
+
+
+def _selected_export_formats(node):
+    """Return list of checked format strings."""
+    available = [
+        ("export_usd",  "usd"),
+        ("export_abc",  "abc"),
+        ("export_bgeo", "bgeo.sc"),
+        ("export_fbx",  "fbx"),
+        ("export_obj",  "obj"),
+        ("export_hda",  "hda"),
+        ("export_hip",  "hip"),
+    ]
+    formats = []
+    for parm_name, fmt in available:
+        parm = node.parm(parm_name)
+        if parm is not None and parm.eval():
+            formats.append(fmt)
+    return formats or ["abc"]
+
+
+def _execute_export_rops(node):
+    """Execute enabled export ROPs. Returns (exported_paths, error_strings)."""
+    import hou, os
+
+    rop_map = {
+        "abc":     node.node("asset_Main/rop_abc"),
+        "bgeo.sc": node.node("asset_Main/rop_bgeo"),
+        "fbx":     node.node("asset_Main/rop_fbx"),
+        "usd":     node.node("asset_Main/rop_usd"),
+    }
+
+    formats  = _selected_export_formats(node)
+    base     = node.parm("export_base_path").evalAsString()
+    exported = []
+    errors   = []
+
+    for fmt in formats:
+        rop = rop_map.get(fmt)
+        if rop is None:
+            errors.append("No ROP node for format: %s" % fmt)
+            continue
+        try:
+            rop.render()
+            path = base + "." + fmt
+            if os.path.isfile(path):
+                exported.append(path)
+            else:
+                errors.append("ROP ran but file not found: %s" % path)
+        except Exception as exc:
+            errors.append("Export failed for .%s: %s" % (fmt, exc))
+            logger.error("ROP export failed for %s: %s", fmt, exc)
+
+    return exported, errors
+
+
+def _prepare_turntable_rops(node, thumbs_dir, passes_enabled):
+    import os
+
+    thumbs_dir = os.path.normpath(thumbs_dir).replace("\\", "/")
+    os.makedirs(thumbs_dir, exist_ok=True)
+
+    if node.parm("thumb_output_dir"):
+        node.parm("thumb_output_dir").set(thumbs_dir)
+
+    rop_names = {
+        "material": "rs_thumb",
+        "clay": "rs_clay",
+        "wire": "rs_wire",
+    }
+
+    for pass_name, rop_name in rop_names.items():
+        if not passes_enabled.get(pass_name):
+            continue
+        rop = node.node("ropnet1/" + rop_name)
+        if rop is None:
+            continue
+        out = rop.parm("RS_outputFileNamePrefix")
+        if out:
+            out.deleteAllKeyframes()
+            out.set("%s/%s.$F4" % (thumbs_dir, pass_name))
+
+
+def _effective_menu_value(node, parm_name, menu_fn):
+    """Return the parm value, falling back to the first menu item.
+
+    Houdini dynamic string menus display the first item but don't write it to
+    the parm until the user explicitly selects something.  This means
+    evalAsString() returns '' even though the dropdown looks non-empty.
+    """
+    val = node.parm(parm_name).evalAsString().strip()
+    if val:
+        return val
+    items = menu_fn(node)   # [token, label, token, label, ...]
+    return items[0] if items else ""
 
 
 def _collect_data(node):
@@ -498,7 +649,7 @@ def _collect_data(node):
     return {
         "name":          node.parm("asset_name").evalAsString().strip(),
         "category":      node.parm("category").evalAsString(),
-        "subcategory":   node.parm("subcategory").evalAsString().strip(),
+        "subcategory":   _effective_menu_value(node, "subcategory", subcategory_menu_items),
         "renderer":      node.parm("renderer").evalAsString(),
         "dcc":           node.parm("dcc").evalAsString(),
         "has_rig":       int(node.parm("has_rig").eval()),

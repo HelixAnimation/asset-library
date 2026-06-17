@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<shelfDocument>
+
+  <tool name="asset_library_open" label="Asset Library" icon="MISC_python">
+    <toolMenuContext name="viewer">
+      <contextNetType>OBJ</contextNetType>
+      <contextNetType>SOP</contextNetType>
+    </toolMenuContext>
+    <script scriptType="python"><![CDATA[
+import PrismInit
+plugin = PrismInit.pcore.plugins.getPlugin("AssetLibrary")
+if plugin:
+    plugin.launchAssetLibrary()
+else:
+    hou.ui.displayMessage(
+        "Asset Library plugin not found in Prism.\n"
+        "Make sure the plugin is installed and Prism is running.",
+        severity=hou.severityType.Warning,
+        title="Asset Library",
+    )
+]]></script>
+  </tool>
+
+  <tool name="asset_library_scan" label="Sync Library" icon="MISC_python">
+    <toolMenuContext name="viewer">
+      <contextNetType>OBJ</contextNetType>
+    </toolMenuContext>
+    <script scriptType="python"><![CDATA[
+import PrismInit
+plugin = PrismInit.pcore.plugins.getPlugin("AssetLibrary")
+if plugin:
+    plugin.scanLibrary()
+else:
+    hou.ui.displayMessage(
+        "Asset Library plugin not found in Prism.",
+        severity=hou.severityType.Warning,
+        title="Asset Library",
+    )
+]]></script>
+  </tool>
+
+  <toolshelf name="asset_library_shelf" label="Asset Library">
+    <memberTool name="asset_library_open"/>
+    <memberTool name="asset_library_scan"/>
+  </toolshelf>
+
+</shelfDocument>
