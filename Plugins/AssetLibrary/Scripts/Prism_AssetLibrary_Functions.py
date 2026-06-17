@@ -145,7 +145,21 @@ class Prism_AssetLibrary_Functions(object):
         hda_files = glob.glob(os.path.join(otls_dir, "object_AssetPublisher.*.hda"))
         if not hda_files:
             return
+        canonical = {p.replace("\\", "/") for p in hda_files}
         try:
+            # Evict any AssetPublisher HDA loaded from a stale path (e.g. a leftover
+            # package file that still points to the old dev folder after the plugin
+            # was moved to the NAS). Without this the dev HDA wins and the NAS one
+            # never takes effect.
+            for loaded_path in list(hou.hda.loadedFiles()):
+                norm = loaded_path.replace("\\", "/")
+                base = norm.rsplit("/", 1)[-1]
+                if base.startswith("object_AssetPublisher.") and base.endswith(".hda"):
+                    if norm not in canonical:
+                        try:
+                            hou.hda.uninstallFile(norm)
+                        except Exception:
+                            pass
             loaded = {f.replace("\\", "/") for f in hou.hda.loadedFiles()}
             for hda_path in hda_files:
                 if hda_path.replace("\\", "/") not in loaded:
