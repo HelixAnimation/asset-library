@@ -104,14 +104,16 @@ class Prism_AssetLibrary_Functions(object):
             os.makedirs(pkg_dir, exist_ok=True)
             pkg_path = os.path.join(pkg_dir, "AssetLibrary.json")
             pkg_content = {"path": houdini_dir.replace("\\", "/")}
-            # Only rewrite if path changed (plugin moved)
+            existing = None
             if os.path.isfile(pkg_path):
-                with open(pkg_path, "r") as f:
-                    existing = json.load(f)
-                if existing == pkg_content:
-                    return
-            with open(pkg_path, "w") as f:
-                json.dump(pkg_content, f, indent=2)
+                try:
+                    with open(pkg_path, "r") as f:
+                        existing = json.load(f)
+                except Exception:
+                    pass
+            if existing != pkg_content:
+                with open(pkg_path, "w") as f:
+                    json.dump(pkg_content, f, indent=2)
         except Exception as exc:
             logger.warning("Could not write Asset Library package file: %s", exc)
 
