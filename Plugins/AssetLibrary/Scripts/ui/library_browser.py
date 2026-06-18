@@ -39,8 +39,8 @@ class _SplitterHandle(QSplitterHandle):
 
     def __init__(self, orientation, parent):
         super().__init__(orientation, parent)
-        self._btn = QPushButton("◀", self)
-        self._btn.setFixedSize(14, 26)
+        self._btn = QPushButton("«", self)
+        self._btn.setFixedSize(14, 36)
         self._btn.move(0, 0)
         self._btn.setCursor(Qt.PointingHandCursor)
         self._btn.setToolTip("Collapse sidebar")
@@ -48,7 +48,7 @@ class _SplitterHandle(QSplitterHandle):
             "QPushButton {"
             "  background: %s; border: none;"
             "  border-bottom-right-radius: 4px;"
-            "  color: %s; font-size: 8px; padding: 0;"
+            "  color: %s; font-size: 11px; padding: 0;"
             "}"
             "QPushButton:hover { background: %s; color: %s; }"
             % (BG_TERTIARY, TEXT_SECONDARY, ACCENT_BG, TEXT_PRIMARY)
@@ -68,13 +68,13 @@ class _SplitterHandle(QSplitterHandle):
         if sizes[0] > 0:
             sp._saved_sidebar_width = sizes[0]
             sp.setSizes([0, sizes[0] + sizes[1]])
-            self._btn.setText("▶")
+            self._btn.setText("»")
             self._btn.setToolTip("Expand sidebar")
         else:
             w = getattr(sp, "_saved_sidebar_width", _SIDEBAR_WIDTH)
             total = sizes[0] + sizes[1]
             sp.setSizes([w, total - w])
-            self._btn.setText("◀")
+            self._btn.setText("«")
             self._btn.setToolTip("Collapse sidebar")
 
 
