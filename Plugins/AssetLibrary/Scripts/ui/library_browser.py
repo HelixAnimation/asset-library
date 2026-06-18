@@ -35,31 +35,32 @@ _SIDEBAR_WIDTH = 200
 
 
 class _SplitterHandle(QSplitterHandle):
-    """Splitter handle with a centered collapse/expand arrow button."""
+    """Splitter handle with an arrow button pinned to the top."""
 
     def __init__(self, orientation, parent):
         super().__init__(orientation, parent)
-        self.setStyleSheet(
-            "QSplitterHandle, _SplitterHandle { background: %s; }" % BG_SECONDARY
-        )
         self._btn = QPushButton("◀", self)
-        self._btn.setFixedSize(14, 48)
+        self._btn.setFixedSize(14, 26)
+        self._btn.move(0, 0)
         self._btn.setCursor(Qt.PointingHandCursor)
         self._btn.setToolTip("Collapse sidebar")
         self._btn.setStyleSheet(
             "QPushButton {"
-            "  background: %s; border: none; border-radius: 0px;"
+            "  background: %s; border: none;"
+            "  border-bottom-right-radius: 4px;"
             "  color: %s; font-size: 8px; padding: 0;"
             "}"
             "QPushButton:hover { background: %s; color: %s; }"
-            % (BG_SECONDARY, TEXT_TERTIARY, BG_TERTIARY, TEXT_PRIMARY)
+            % (BG_TERTIARY, TEXT_SECONDARY, ACCENT_BG, TEXT_PRIMARY)
         )
         self._btn.clicked.connect(self._onToggle)
 
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        y = max(0, (self.height() - self._btn.height()) // 2)
-        self._btn.move(0, y)
+    def paintEvent(self, event):
+        # Fill handle with content-area colour — makes the divider line invisible
+        from qtpy.QtGui import QPainter
+        p = QPainter(self)
+        p.fillRect(self.rect(), QColor(BG_SECONDARY))
+        p.end()
 
     def _onToggle(self):
         sp = self.splitter()
