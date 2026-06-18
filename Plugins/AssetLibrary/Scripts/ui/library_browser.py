@@ -40,7 +40,7 @@ class _SplitterHandle(QSplitterHandle):
     def __init__(self, orientation, parent):
         super().__init__(orientation, parent)
         self._btn = QPushButton("«", self)
-        self._btn.setFixedSize(14, 36)
+        self._btn.setFixedSize(20, 52)
         self._btn.move(0, 0)
         self._btn.setCursor(Qt.PointingHandCursor)
         self._btn.setToolTip("Collapse sidebar")
@@ -48,7 +48,7 @@ class _SplitterHandle(QSplitterHandle):
             "QPushButton {"
             "  background: %s; border: none;"
             "  border-bottom-right-radius: 4px;"
-            "  color: %s; font-size: 11px; padding: 0;"
+            "  color: %s; font-size: 13px; padding: 0;"
             "}"
             "QPushButton:hover { background: %s; color: %s; }"
             % (BG_TERTIARY, TEXT_SECONDARY, ACCENT_BG, TEXT_PRIMARY)
@@ -139,7 +139,7 @@ class LibraryBrowser(QMainWindow):
     def _build(self):
         # Splitter is the central widget — left = sidebar, right = main panel
         self._splitter = _ResizableSplitter(Qt.Horizontal)
-        self._splitter.setHandleWidth(14)
+        self._splitter.setHandleWidth(20)
         self._splitter.setCollapsible(0, True)
         self.setCentralWidget(self._splitter)
 
