@@ -71,9 +71,8 @@ class SidebarWidget(QWidget):
         super().__init__(parent)
         self.setObjectName("sidebar")
         self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setFixedWidth(200)
-        self.setMinimumWidth(0)   # allow animation to shrink below fixed width
-        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+        self.setMinimumWidth(0)
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
         self.setStyleSheet("#sidebar { background: %s; }" % BG_SIDEBAR)
 
         self._items        = []    # list of _SidebarItem

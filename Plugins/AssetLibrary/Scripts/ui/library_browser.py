@@ -41,7 +41,6 @@ class _SplitterHandle(QSplitterHandle):
         super().__init__(orientation, parent)
         self._btn = QPushButton("«", self)
         self._btn.setFixedSize(20, 52)
-        self._btn.move(0, 0)
         self._btn.setCursor(Qt.PointingHandCursor)
         self._btn.setToolTip("Collapse sidebar")
         self._btn.setStyleSheet(
@@ -54,6 +53,11 @@ class _SplitterHandle(QSplitterHandle):
             % (BG_TERTIARY, TEXT_SECONDARY, ACCENT_BG, TEXT_PRIMARY)
         )
         self._btn.clicked.connect(self._onToggle)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        y = max(0, (self.height() - self._btn.height()) // 2)
+        self._btn.move(0, y)
 
     def paintEvent(self, event):
         # Fill handle with content-area colour — makes the divider line invisible
@@ -106,6 +110,12 @@ class LibraryBrowser(QMainWindow):
         self._filter_state = {}
         self._active_tags = []     # ordered list of active tag names
 
+        # -- Sidebar settings ---------------------------------------------
+        _sb = plugin.getSidebarSettings() if plugin else {}
+        self._sidebar_default_width  = _sb.get("default_width",  _SIDEBAR_WIDTH)
+        self._sidebar_max_width      = _sb.get("max_width",      _SIDEBAR_WIDTH)
+        self._sidebar_start_collapsed = _sb.get("start_collapsed", False)
+
         # -- DB -----------------------------------------------------------
         self._db = None
         self._username = self._getUsername()
@@ -145,6 +155,7 @@ class LibraryBrowser(QMainWindow):
 
         # Left: full-height sidebar
         self.sidebar = SidebarWidget()
+        self.sidebar.setMaximumWidth(self._sidebar_max_width)
         self.sidebar.itemSelected.connect(self._onSidebarSelect)
         self._splitter.addWidget(self.sidebar)
 
@@ -191,8 +202,7 @@ class LibraryBrowser(QMainWindow):
         right_layout.addWidget(self._buildStatusBar())
         self._splitter.addWidget(right)
 
-        # Initial sizes: sidebar at default width, right takes the rest
-        self._splitter.setSizes([_SIDEBAR_WIDTH, 9999])
+        self._splitter.setStretchFactor(1, 1)
 
     def _buildToolbar(self):
         bar = QWidget()
@@ -725,7 +735,14 @@ class LibraryBrowser(QMainWindow):
         dlg = SettingsDialog(plugin=self.plugin, parent=self, card_width=self._card_width)
         dlg.saved.connect(self.refreshAssets)
         dlg.cardWidthChanged.connect(self._onCardWidthChanged)
+        dlg.sidebarSettingsChanged.connect(self._onSidebarSettingsChanged)
         dlg.exec_()
+
+    def _onSidebarSettingsChanged(self, default_width, max_width, start_collapsed):
+        self._sidebar_default_width   = default_width
+        self._sidebar_max_width       = max_width
+        self._sidebar_start_collapsed = start_collapsed
+        self.sidebar.setMaximumWidth(max_width)
 
     def _onCardWidthChanged(self, w):
         self._card_width = w
@@ -1191,6 +1208,17 @@ class LibraryBrowser(QMainWindow):
             return self.core.username
         except Exception:
             return os.environ.get("USERNAME", "artist")
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not getattr(self, "_splitter_sized", False):
+            self._splitter_sized = True
+            w  = self._splitter.width()
+            dw = 0 if self._sidebar_start_collapsed else self._sidebar_default_width
+            self._splitter.setSizes([dw, max(0, w - dw - self._splitter.handleWidth())])
+            handle = self._splitter.handle(1)
+            if hasattr(handle, "_btn"):
+                handle._btn.setText("»" if self._sidebar_start_collapsed else "«")
 
     def _centerOnScreen(self):
         try:

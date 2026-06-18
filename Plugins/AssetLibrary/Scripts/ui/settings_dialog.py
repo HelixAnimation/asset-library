@@ -3,7 +3,7 @@ import os
 from qtpy.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QWidget, QFrame, QScrollArea, QSizePolicy,
-    QFileDialog, QProgressBar, QSpinBox, QMessageBox,
+    QFileDialog, QProgressBar, QSpinBox, QMessageBox, QCheckBox,
 )
 from qtpy.QtCore import Qt, Signal, QThread
 
@@ -18,6 +18,7 @@ class SettingsDialog(QDialog):
 
     saved = Signal()
     cardWidthChanged = Signal(int)
+    sidebarSettingsChanged = Signal(int, int, bool)  # default_width, max_width, start_collapsed
 
     def __init__(self, plugin=None, parent=None, card_width=235):
         super().__init__(parent)
@@ -72,6 +73,7 @@ class SettingsDialog(QDialog):
 
         body_layout.addWidget(self._buildLibrarySection())
         body_layout.addWidget(self._buildDisplaySection())
+        body_layout.addWidget(self._buildSidebarSection())
         body_layout.addWidget(self._buildOmittedSection())
 
         body_layout.addStretch()
@@ -159,6 +161,51 @@ class SettingsDialog(QDialog):
             "font-size: 10px; color: %s; background: transparent;" % TEXT_TERTIARY
         )
         section.addWidget(hint)
+
+        return section
+
+    def _buildSidebarSection(self):
+        section = _Section("SIDEBAR")
+
+        _spin_ss = (
+            "QSpinBox { background: %(bg2)s; border: 1px solid %(bl)s;"
+            " border-radius: 6px; padding: 4px 8px; color: %(tp)s; font-size: 12px; }"
+            "QSpinBox:focus { border-color: %(bm)s; }"
+            "QSpinBox::up-button, QSpinBox::down-button { width: 18px; }"
+            % {"bg2": BG_SECONDARY, "bl": BORDER_LIGHT, "bm": BORDER_MID, "tp": TEXT_PRIMARY}
+        )
+
+        section.addField("DEFAULT WIDTH (px)")
+        dw_row = QHBoxLayout()
+        dw_row.setSpacing(6)
+        self.sidebar_default_spin = QSpinBox()
+        self.sidebar_default_spin.setRange(100, 600)
+        self.sidebar_default_spin.setSuffix(" px")
+        self.sidebar_default_spin.setStyleSheet(_spin_ss)
+        dw_row.addWidget(self.sidebar_default_spin)
+        dw_row.addStretch()
+        section.addLayout(dw_row)
+
+        section.addField("MAX WIDTH (px)")
+        mw_row = QHBoxLayout()
+        mw_row.setSpacing(6)
+        self.sidebar_max_spin = QSpinBox()
+        self.sidebar_max_spin.setRange(100, 600)
+        self.sidebar_max_spin.setSuffix(" px")
+        self.sidebar_max_spin.setStyleSheet(_spin_ss)
+        mw_row.addWidget(self.sidebar_max_spin)
+        mw_row.addStretch()
+        section.addLayout(mw_row)
+
+        self.sidebar_start_collapsed_chk = QCheckBox("Open collapsed by default")
+        self.sidebar_start_collapsed_chk.setStyleSheet(
+            "QCheckBox { color: %s; font-size: 12px; background: transparent; }"
+            "QCheckBox::indicator { width: 14px; height: 14px; border: 1px solid %s;"
+            " border-radius: 3px; background: %s; }"
+            "QCheckBox::indicator:checked { background: %s; border-color: %s; }"
+            % (TEXT_PRIMARY, BORDER_MID, BG_SECONDARY, ACCENT, ACCENT)
+        )
+        section.addWidget(self.sidebar_start_collapsed_chk)
 
         return section
 
@@ -285,6 +332,14 @@ class SettingsDialog(QDialog):
         if self.plugin:
             current = self.plugin._getAssetLibRoot() or ""
             self.path_edit.setText(current)
+            sb = self.plugin.getSidebarSettings()
+            self.sidebar_default_spin.setValue(sb["default_width"])
+            self.sidebar_max_spin.setValue(sb["max_width"])
+            self.sidebar_start_collapsed_chk.setChecked(sb["start_collapsed"])
+        else:
+            self.sidebar_default_spin.setValue(200)
+            self.sidebar_max_spin.setValue(200)
+            self.sidebar_start_collapsed_chk.setChecked(False)
         self._populateOmitted()
 
     def _onBrowse(self):
@@ -353,7 +408,13 @@ class SettingsDialog(QDialog):
             return
         if self.plugin and path:
             self.plugin.setLibraryRoot(path)
+        dw  = self.sidebar_default_spin.value()
+        mw  = self.sidebar_max_spin.value()
+        sc  = self.sidebar_start_collapsed_chk.isChecked()
+        if self.plugin:
+            self.plugin.setSidebarSettings(dw, mw, sc)
         self.cardWidthChanged.emit(self.card_width_spin.value())
+        self.sidebarSettingsChanged.emit(dw, mw, sc)
         self.saved.emit()
         self.accept()
 

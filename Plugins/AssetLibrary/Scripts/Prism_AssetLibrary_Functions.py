@@ -333,6 +333,26 @@ class Prism_AssetLibrary_Functions(object):
         except Exception as e:
             logger.error("Failed to save library root: %s", e)
 
+    def getSidebarSettings(self):
+        try:
+            dw = self.core.getConfig("assetLibrary", "sidebarDefaultWidth")
+            mw = self.core.getConfig("assetLibrary", "sidebarMaxWidth")
+            sc = self.core.getConfig("assetLibrary", "sidebarStartCollapsed")
+            default_width   = int(dw) if dw else 200
+            max_width       = int(mw) if mw else 200
+            start_collapsed = (sc == "true") if sc else False
+        except Exception:
+            default_width, max_width, start_collapsed = 200, 200, False
+        return {"default_width": default_width, "max_width": max_width, "start_collapsed": start_collapsed}
+
+    def setSidebarSettings(self, default_width, max_width, start_collapsed):
+        try:
+            self.core.setConfig("assetLibrary", "sidebarDefaultWidth",   val=str(default_width))
+            self.core.setConfig("assetLibrary", "sidebarMaxWidth",        val=str(max_width))
+            self.core.setConfig("assetLibrary", "sidebarStartCollapsed",  val="true" if start_collapsed else "false")
+        except Exception as e:
+            logger.error("Failed to save sidebar settings: %s", e)
+
     def getDB(self):
         asset_lib = self._getAssetLibRoot()
         if not asset_lib:
