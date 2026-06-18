@@ -8,8 +8,9 @@ from qtpy.QtWidgets import (
     QPushButton, QLineEdit, QComboBox, QScrollArea,
     QFrame, QSizePolicy, QApplication, QCheckBox,
     QGridLayout, QGraphicsDropShadowEffect, QMessageBox,
+    QSplitter, QSplitterHandle,
 )
-from qtpy.QtCore import Qt, QTimer, Signal, QSize, QEvent, QPropertyAnimation, QEasingCurve
+from qtpy.QtCore import Qt, QTimer, Signal, QSize, QEvent
 from qtpy.QtGui import QFont, QIcon, QColor
 
 from ui.styles import (
@@ -33,22 +34,15 @@ _SORT_OPTIONS = ["Sort: Recent", "Sort: Name A–Z", "Sort: Name Z–A", "Sort: 
 _SIDEBAR_WIDTH = 200
 
 
-class _SidebarToggle(QWidget):
-    """Thin vertical strip with a centered arrow button to collapse/expand the sidebar."""
+class _SplitterHandle(QSplitterHandle):
+    """Splitter handle with a centered collapse/expand arrow button."""
 
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setFixedWidth(14)
-        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
-        self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setStyleSheet("background: %s;" % BG_SECONDARY)
-        self._expanded = True
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
-        self._btn = QPushButton("◀")
+    def __init__(self, orientation, parent):
+        super().__init__(orientation, parent)
+        self.setStyleSheet(
+            "QSplitterHandle, _SplitterHandle { background: %s; }" % BG_SECONDARY
+        )
+        self._btn = QPushButton("◀", self)
         self._btn.setFixedSize(14, 48)
         self._btn.setCursor(Qt.PointingHandCursor)
         self._btn.setToolTip("Collapse sidebar")
@@ -60,24 +54,36 @@ class _SidebarToggle(QWidget):
             "QPushButton:hover { background: %s; color: %s; }"
             % (BG_SECONDARY, TEXT_TERTIARY, BG_TERTIARY, TEXT_PRIMARY)
         )
-        self._btn.clicked.connect(self._emitToggle)
+        self._btn.clicked.connect(self._onToggle)
 
-        layout.addStretch(1)
-        layout.addWidget(self._btn)
-        layout.addStretch(1)
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        y = max(0, (self.height() - self._btn.height()) // 2)
+        self._btn.move(0, y)
 
-    def _emitToggle(self):
-        p = self.parent()
-        while p is not None:
-            if hasattr(p, "_toggleSidebar"):
-                p._toggleSidebar()
-                return
-            p = p.parent()
+    def _onToggle(self):
+        sp = self.splitter()
+        sizes = sp.sizes()
+        if sizes[0] > 0:
+            sp._saved_sidebar_width = sizes[0]
+            sp.setSizes([0, sizes[0] + sizes[1]])
+            self._btn.setText("▶")
+            self._btn.setToolTip("Expand sidebar")
+        else:
+            w = getattr(sp, "_saved_sidebar_width", _SIDEBAR_WIDTH)
+            total = sizes[0] + sizes[1]
+            sp.setSizes([w, total - w])
+            self._btn.setText("◀")
+            self._btn.setToolTip("Collapse sidebar")
 
-    def setExpanded(self, expanded: bool):
-        self._expanded = expanded
-        self._btn.setText("◀" if expanded else "▶")
-        self._btn.setToolTip("Collapse sidebar" if expanded else "Expand sidebar")
+
+class _ResizableSplitter(QSplitter):
+    def __init__(self, orientation=Qt.Horizontal, parent=None):
+        super().__init__(orientation, parent)
+        self._saved_sidebar_width = _SIDEBAR_WIDTH
+
+    def createHandle(self):
+        return _SplitterHandle(self.orientation(), self)
 _CARD_WIDTH_DEFAULT = 235
 _CARD_WIDTH_MIN     = 90
 _CARD_WIDTH_MAX     = 425
@@ -130,23 +136,16 @@ class LibraryBrowser(QMainWindow):
     # ------------------------------------------------------------------
 
     def _build(self):
-        central = QWidget()
-        central.setObjectName("centralWidget")
-        central.setStyleSheet("background: %s;" % BG_PRIMARY)
-        self.setCentralWidget(central)
-
-        root = QHBoxLayout(central)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
+        # Splitter is the central widget — left = sidebar, right = main panel
+        self._splitter = _ResizableSplitter(Qt.Horizontal)
+        self._splitter.setHandleWidth(14)
+        self._splitter.setCollapsible(0, True)
+        self.setCentralWidget(self._splitter)
 
         # Left: full-height sidebar
         self.sidebar = SidebarWidget()
         self.sidebar.itemSelected.connect(self._onSidebarSelect)
-        root.addWidget(self.sidebar)
-
-        # Collapse toggle strip
-        self._sidebar_toggle = _SidebarToggle(central)
-        root.addWidget(self._sidebar_toggle)
+        self._splitter.addWidget(self.sidebar)
 
         # Right: toolbar + filters + content + status
         right = QWidget()
@@ -188,37 +187,11 @@ class LibraryBrowser(QMainWindow):
         body_layout.addWidget(self.inspector)
 
         right_layout.addWidget(body, 1)
-
         right_layout.addWidget(self._buildStatusBar())
-        root.addWidget(right, 1)
+        self._splitter.addWidget(right)
 
-    # ------------------------------------------------------------------
-    # Sidebar collapse / expand
-    # ------------------------------------------------------------------
-
-    def _toggleSidebar(self):
-        expanded = self.sidebar.isVisible()
-        if expanded:
-            self._sidebar_anim = QPropertyAnimation(self.sidebar, b"maximumWidth")
-            self._sidebar_anim.setDuration(180)
-            self._sidebar_anim.setStartValue(_SIDEBAR_WIDTH)
-            self._sidebar_anim.setEndValue(0)
-            self._sidebar_anim.setEasingCurve(QEasingCurve.InOutCubic)
-            self._sidebar_anim.finished.connect(lambda: self.sidebar.hide())
-            self._sidebar_anim.start()
-        else:
-            self.sidebar.show()
-            self.sidebar.setMaximumWidth(0)
-            self._sidebar_anim = QPropertyAnimation(self.sidebar, b"maximumWidth")
-            self._sidebar_anim.setDuration(180)
-            self._sidebar_anim.setStartValue(0)
-            self._sidebar_anim.setEndValue(_SIDEBAR_WIDTH)
-            self._sidebar_anim.setEasingCurve(QEasingCurve.InOutCubic)
-            self._sidebar_anim.finished.connect(
-                lambda: self.sidebar.setMaximumWidth(_SIDEBAR_WIDTH)
-            )
-            self._sidebar_anim.start()
-        self._sidebar_toggle.setExpanded(not expanded)
+        # Initial sizes: sidebar at default width, right takes the rest
+        self._splitter.setSizes([_SIDEBAR_WIDTH, 9999])
 
     def _buildToolbar(self):
         bar = QWidget()
