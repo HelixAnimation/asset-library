@@ -18,6 +18,15 @@ class Prism_AssetLibrary_Functions(object):
 
         self._addScriptPath()
 
+        # If we're already inside Houdini (startup complete fired before this
+        # plugin loaded), install the HDA immediately for this session.
+        try:
+            import hou
+            self._installHoudiniPackage()
+            self._installHoudiniHDA()
+        except ImportError:
+            pass
+
         self.core.registerCallback(
             "trayContextMenuRequested",
             self.onTrayContextMenuRequested,
