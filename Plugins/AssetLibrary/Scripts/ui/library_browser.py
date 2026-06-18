@@ -9,7 +9,7 @@ from qtpy.QtWidgets import (
     QFrame, QSizePolicy, QApplication, QCheckBox,
     QGridLayout, QGraphicsDropShadowEffect, QMessageBox,
 )
-from qtpy.QtCore import Qt, QTimer, Signal, QSize, QEvent
+from qtpy.QtCore import Qt, QTimer, Signal, QSize, QEvent, QPropertyAnimation, QEasingCurve
 from qtpy.QtGui import QFont, QIcon, QColor
 
 from ui.styles import (
@@ -30,6 +30,54 @@ from ui.tag_dropdown import TagDropdown as _TagDropdown
 logger = logging.getLogger(__name__)
 
 _SORT_OPTIONS = ["Sort: Recent", "Sort: Name A–Z", "Sort: Name Z–A", "Sort: Category"]
+_SIDEBAR_WIDTH = 200
+
+
+class _SidebarToggle(QWidget):
+    """Thin vertical strip with a centered arrow button to collapse/expand the sidebar."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedWidth(14)
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setStyleSheet("background: %s;" % BG_SECONDARY)
+        self._expanded = True
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        self._btn = QPushButton("◀")
+        self._btn.setFixedSize(14, 48)
+        self._btn.setCursor(Qt.PointingHandCursor)
+        self._btn.setToolTip("Collapse sidebar")
+        self._btn.setStyleSheet(
+            "QPushButton {"
+            "  background: %s; border: none; border-radius: 0px;"
+            "  color: %s; font-size: 8px; padding: 0;"
+            "}"
+            "QPushButton:hover { background: %s; color: %s; }"
+            % (BG_SECONDARY, TEXT_TERTIARY, BG_TERTIARY, TEXT_PRIMARY)
+        )
+        self._btn.clicked.connect(self._emitToggle)
+
+        layout.addStretch(1)
+        layout.addWidget(self._btn)
+        layout.addStretch(1)
+
+    def _emitToggle(self):
+        p = self.parent()
+        while p is not None:
+            if hasattr(p, "_toggleSidebar"):
+                p._toggleSidebar()
+                return
+            p = p.parent()
+
+    def setExpanded(self, expanded: bool):
+        self._expanded = expanded
+        self._btn.setText("◀" if expanded else "▶")
+        self._btn.setToolTip("Collapse sidebar" if expanded else "Expand sidebar")
 _CARD_WIDTH_DEFAULT = 235
 _CARD_WIDTH_MIN     = 90
 _CARD_WIDTH_MAX     = 425
@@ -96,6 +144,10 @@ class LibraryBrowser(QMainWindow):
         self.sidebar.itemSelected.connect(self._onSidebarSelect)
         root.addWidget(self.sidebar)
 
+        # Collapse toggle strip
+        self._sidebar_toggle = _SidebarToggle(central)
+        root.addWidget(self._sidebar_toggle)
+
         # Right: toolbar + filters + content + status
         right = QWidget()
         right.setAttribute(Qt.WA_StyledBackground, True)
@@ -139,6 +191,34 @@ class LibraryBrowser(QMainWindow):
 
         right_layout.addWidget(self._buildStatusBar())
         root.addWidget(right, 1)
+
+    # ------------------------------------------------------------------
+    # Sidebar collapse / expand
+    # ------------------------------------------------------------------
+
+    def _toggleSidebar(self):
+        expanded = self.sidebar.isVisible()
+        if expanded:
+            self._sidebar_anim = QPropertyAnimation(self.sidebar, b"maximumWidth")
+            self._sidebar_anim.setDuration(180)
+            self._sidebar_anim.setStartValue(_SIDEBAR_WIDTH)
+            self._sidebar_anim.setEndValue(0)
+            self._sidebar_anim.setEasingCurve(QEasingCurve.InOutCubic)
+            self._sidebar_anim.finished.connect(lambda: self.sidebar.hide())
+            self._sidebar_anim.start()
+        else:
+            self.sidebar.show()
+            self.sidebar.setMaximumWidth(0)
+            self._sidebar_anim = QPropertyAnimation(self.sidebar, b"maximumWidth")
+            self._sidebar_anim.setDuration(180)
+            self._sidebar_anim.setStartValue(0)
+            self._sidebar_anim.setEndValue(_SIDEBAR_WIDTH)
+            self._sidebar_anim.setEasingCurve(QEasingCurve.InOutCubic)
+            self._sidebar_anim.finished.connect(
+                lambda: self.sidebar.setMaximumWidth(_SIDEBAR_WIDTH)
+            )
+            self._sidebar_anim.start()
+        self._sidebar_toggle.setExpanded(not expanded)
 
     def _buildToolbar(self):
         bar = QWidget()
